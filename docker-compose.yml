@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  deltabot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.txt
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DELTA_EXCHANGE_API_KEY=${DELTA_EXCHANGE_API_KEY}
+      - DELTA_EXCHANGE_API_SECRET=${DELTA_EXCHANGE_API_SECRET}
+    restart: always

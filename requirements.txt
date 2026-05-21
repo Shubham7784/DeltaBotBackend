@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+websockets
+pydantic
+python-dotenv
+httpx
+cryptography
+psycopg2-binary
