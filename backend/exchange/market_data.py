@@ -1,6 +1,7 @@
-from .client import DeltaClient
-from ..core.config import config
+from exchange.client import DeltaClient
+from core.config import config
 import asyncio
+import time
 
 class MarketDataService:
     def __init__(self):
@@ -8,13 +9,22 @@ class MarketDataService:
         self.instruments = []
         self.btc_options = []
         self.btc_futures = []
+        self.eth_futures = []
+        self.eth_options = []
+        self.btc_daily_straddle = []
+        self.ohlc_candles = []
 
     async def initialize(self):
         try:
-            products = await self.client.get_products()
+            products = await self.client.get_all_tickers()
             self.instruments = products.get("result", [])
-            self.btc_futures = [i for i in self.instruments if i.get("underlying_asset") == "BTC" and i.get("asset_type") == "futures"]
-            self.btc_options = [i for i in self.instruments if "BTC" in i.get("symbol")]
+            self.btc_futures = [i for i in self.instruments if i.get("symbol","") == "BTCUSD"]
+            self.btc_options = [i for i in self.instruments if ("P-BTC-" in i.get("symbol","") or "C-BTC-" in i.get("symbol",""))]
+            self.eth_futures = [i for i in self.instruments if i.get("symbol","") == "ETHUSD"]
+            self.eth_options = [i for i in self.instruments if ("P-ETH-" in i.get("symbol","") or "C-ETH-" in i.get("symbol",""))]
+            self.btc_daily_straddle = [i for i in self.instruments if i.get("description","") == "BTC Daily Straddle"]
+            historical_candles = await self.get_historical_ohlc_candles("BTCUSD","4h")
+            self.ohlc_candles = historical_candles
         except Exception as e:
             print(f"Error initializing market data: {e}")
 
@@ -49,5 +59,17 @@ class MarketDataService:
         except Exception as e:
             print(f"Error fetching all tickers: {e}")
             return []
+        
 
+    async def get_historical_ohlc_candles(self,symbol:str, resolution:str):
+        # Delta API V2: GET /v2/candles
+        params = {
+            'symbol': symbol,
+            'resolution': resolution,
+            'start': int(time.time()) - 40*4*60*60, # Last 40 candles for 4h resolution
+            'end': int(time.time())
+        }
+        ohcl = await self.client.request("GET", "/v2/history/candles", params=params)
+        self.ohlc_candles = ohcl.get("result", [])
+        return self.ohlc_candles
 market_data = MarketDataService()

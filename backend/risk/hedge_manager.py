@@ -1,4 +1,4 @@
-from ..paper_trading.engine import paper_engine
+from paper_trading.engine import paper_engine
 
 class HedgeManager:
     def __init__(self):

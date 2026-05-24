@@ -3,7 +3,7 @@ import hashlib
 import time
 import json
 import httpx
-from ..core.config import config
+from core.config import config
 import random
 class DeltaClient:
     def __init__(self):
@@ -26,7 +26,7 @@ class DeltaClient:
         return hash.hexdigest()
 
     async def request(self, method: str, path: str, params: dict = None, data: dict = None, sign: bool = False):
-        timestamp = str(int(time.time())-9)
+        timestamp = str(int(time.time()))
         
         # Proper query string generation for signing
         query_str = ""
@@ -60,7 +60,7 @@ class DeltaClient:
                 content=body_str if data else None,
                 headers=headers
             )
-            if("orders" in path):
+            if("orders" in path or "margined" in path):
                 print(response.text) # Debugging line to print raw response
 
             response.raise_for_status()
@@ -73,8 +73,8 @@ class DeltaClient:
             print(f"API Request Error: {e}")
             raise
 
-    async def get_products(self):
-        return await self.request("GET", "/v2/products")
+    async def get_all_tickers(self):
+        return await self.request("GET", "/v2/tickers")
     
     async def get_product_price(self, symbol: str):
         ticker = await self.get_ticker(symbol)
@@ -98,19 +98,43 @@ class DeltaClient:
         # Placeholder for live trading logic
         print(f"Opening live position: {order.get('symbol')} {side} {size} @ {price} with {leverage}x leverage")
         client_order_id = f"deltaBot-{random.randint(1000,9999)}-{int(time.time())}"
+        stop_price = 0 
+        target_price = 0
+        stop_limit = 0
+        target_limit = 0
+        contract_type = order.get("product", {}).get("contractType", "") or order.get("contract_type","")
+        if("perpetual" in contract_type):
+            if side == "LONG":
+                stop_price = price * 0.98 # 2% stop loss
+                stop_limit = stop_price - 200 # 3% stop loss limit
+                target_price = price * 1.04 # 4% take profit
+                target_limit = target_price - 200
+                
+            else:
+                stop_price = price * 1.02 # 2% stop loss
+                stop_limit = stop_price + 200 # 3% stop loss limit
+                target_price = price * 0.96 # 4% take profit
+                target_limit = target_price + 200
+        else:
+            if side == "LONG":
+                stop_price = 0  # 5% stop loss for options
+                target_price = price*2 # 10% take profit for options
+            else:
+                stop_price = price * 2 # 100% stop loss for options
+                target_price = 0 # 10% take profit for options
         data = {
-            "product_id": order.get("id"),
+            "product_id": order.get("id") or order.get("product_id"),
             "product_symbol": order.get("symbol"),
             "size": int(size),
             "side": "buy" if side == "LONG" else "sell",
             "order_type": "market_order",
-            "stop_price": 0 if side == "LONG" else 2*price, # Simplified stop loss logic
+            "stop_price": stop_price, # Simplified stop loss logic
             "stop_trigger_method": "last_traded_price",
             "bracket_stop_trigger_method": "last_traded_price",
-            "bracket_stop_loss_limit_price": 0 if side == "LONG" else 2*price+500, # Simplified stop loss limit logic
-            "bracket_stop_loss_price": 0 if side == "LONG" else 2*price+250, # Simplified stop loss logic
-            "bracket_take_profit_limit_price": 2*price if side== "LONG" else 0, # Simplified take profit logic
-            "bracket_take_profit_price": 2*price if side== "LONG" else 0, # Simplified take profit logic
+            "bracket_stop_loss_limit_price": stop_limit, # Simplified stop loss limit logic
+            "bracket_stop_loss_price":stop_price, # Simplified stop loss logic
+            "bracket_take_profit_limit_price": target_limit, # Simplified take profit limit logic
+            "bracket_take_profit_price": target_price, # Simplified take profit logic
             "time_in_force": "gtc",
             "mmp": "disabled",
             "post_only": False,

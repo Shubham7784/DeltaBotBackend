@@ -1,13 +1,16 @@
 import requests
+import time
 headers = {
   'Accept': 'application/json',
-  'api-key': '****',
-  'signature': '****',
-  'timestamp': '****'
 }
+params = {
+    'resolution':'4h',
+    'symbol':'BTCUSD',
+    'start': int(time.time()) - 40*4*60*60,
+    'end':int(time.time())
+}
+r = requests.get('https://cdn-ind.testnet.deltaex.org/v2/history/candles', params= params, headers = headers)
 
-r = requests.get('https://api.india.delta.exchange/v2/wallet/balances', params={
-
-}, headers = headers)
-
-print(r.json())
+result = r.json().get("result",[])
+print(result[0])
+print(len(result))

@@ -8,14 +8,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-
-from backend.core.config import config
-from backend.paper_trading.engine import paper_engine
-from backend.risk.manager import risk_manager
-from backend.risk.hedge_manager import hedge_manager
-from backend.exchange.client import DeltaClient
-from backend.exchange.market_data import market_data
-from backend.strategies.ironfly import iron_fly
+import requests
+from core.config import config
+from paper_trading.engine import paper_engine
+from risk.manager import risk_manager
+from risk.hedge_manager import hedge_manager
+from exchange.client import DeltaClient
+from exchange.market_data import market_data
+from strategies.ironfly import iron_fly
+from strategies.directional import directional_strategy
 
 app = FastAPI()
 delta_client = DeltaClient()
@@ -70,7 +71,7 @@ async def is_bot_running():
 
 @app.get("/api/is-directional-enabled")
 async def is_directional_enabled():
-    return False
+    return risk_manager.directional_enabled
 
 @app.get("/api/risk")
 async def get_risk():
@@ -114,11 +115,16 @@ async def run_strategy1():
 @app.post("/api/strategy2/enable")
 async def enable_strategy2():
     risk_manager.directional_enabled = True
-    return {"status": "enabled"}
+    trade_placed = await directional_strategy.run(paper_engine.btc_price)
+    if trade_placed:
+        return {"status": "enabled"}
+    risk_manager.directional_enabled = False
+    return {"status": "no trade placed"}
 
 @app.post("/api/strategy2/disable")
 async def disable_strategy2():
     risk_manager.directional_enabled = False
+    directional_strategy.reset()
     return {"status": "disabled"}
 
 @app.post("/api/positions/close-all")
@@ -127,7 +133,8 @@ async def close_all_endpoint():
     iron_fly.reset()
     hedge_manager.reset()
     risk_manager.directional_enabled = False
-    
+    directional_strategy.reset()
+
     # Broadcast empty update to instantly refresh frontends
     payload = {
         "type": "MARKET_UPDATE",
@@ -154,11 +161,14 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 async def market_loop():
+    ip = requests.get("https://api.ipify.org").text
+    print(ip)
     while True:
         try:
             # 1. Fetch all tickers from Delta to get prices for all symbols
             tickers = await market_data.get_all_tickers()
             price_map = {}
+
             for t in tickers:
                 symbol = t.get("symbol")
                 price_val = t.get("mark_price") or t.get("last_price") or t.get("price") or t.get("close")
@@ -195,7 +205,7 @@ async def market_loop():
                     "netDelta": greeks.get("delta", 0.0),
                     "netGamma": greeks.get("gamma", 0.0),
                     "netTheta": greeks.get("theta", 0.0),
-                    "directionalEnabled": False
+                    "directionalEnabled": risk_manager.directional_enabled
                 }
             }
             await manager.broadcast(json.dumps(payload))

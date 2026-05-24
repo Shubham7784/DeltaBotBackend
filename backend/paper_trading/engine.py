@@ -5,8 +5,8 @@ import sqlite3
 import psycopg2
 import psycopg2.extras
 from typing import List, Dict, Optional
-from backend.core.config import config
-from backend.exchange.client import DeltaClient
+from core.config import config
+from exchange.client import DeltaClient
 
 class PaperTradingEngine:
     def __init__(self):
@@ -142,6 +142,7 @@ class PaperTradingEngine:
                     "leverage": float(pos.get("leverage", 0)),
                     "margin": float(pos.get("margin", 0)),
                     "unrealizedPnL": float(pos.get("realized_cashflow", 0)) - float(pos.get("unrealized_pnl", 0)),
+                    "contractType": pos.get("product", {}).get("contract_type"),
                     "timestamp": pos.get("timestamp")
                 })
         else:

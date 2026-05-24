@@ -6,3 +6,4 @@ python-dotenv
 httpx
 cryptography
 psycopg2-binary
+requests

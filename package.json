@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "python main.py",
+    "dev": "python backend/main.py",
     "build": "vite build",
     "start": "python3 main.py",
     "lint": "tsc --noEmit"

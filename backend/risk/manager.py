@@ -1,11 +1,12 @@
-from ..paper_trading.engine import paper_engine
-from ..core.config import config
+from paper_trading.engine import paper_engine
+from core.config import config
 
 class RiskManager:
     def __init__(self):
         self.max_daily_drawdown = 0.02 # 2%
         self.max_margin_usage = 0.8 # 80%
         self.client = paper_engine.client
+        self.directional_enabled = False
 
     async def check_safety(self):
         wallet = await paper_engine.get_wallet()
@@ -23,6 +24,8 @@ class RiskManager:
         total_theta = 0.0
         positions = await paper_engine.get_positions()
         for pos in positions:
+            if("perpetual" in pos.get("contractType")):
+                continue # Skip futures for greeks calculation
             ticker = await self.client.get_ticker(pos["symbol"])
             greeks = ticker.get("result", {}).get("greeks", {})
             delta = float(greeks.get("delta", 0))

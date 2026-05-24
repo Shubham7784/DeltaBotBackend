@@ -1,7 +1,7 @@
-from ..exchange.market_data import market_data
-from ..paper_trading.engine import paper_engine
+from exchange.market_data import market_data
+from paper_trading.engine import paper_engine
 import math
-from backend.exchange.client import DeltaClient
+from exchange.client import DeltaClient
 import time
 class IronFlyStrategy:
     def __init__(self):
