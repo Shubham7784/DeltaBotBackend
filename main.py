@@ -17,6 +17,7 @@ from exchange.client import DeltaClient
 from exchange.market_data import market_data
 from strategies.ironfly import iron_fly
 from strategies.directional import directional_strategy
+from zoneinfo import ZoneInfo
 
 app = FastAPI()
 delta_client = DeltaClient()
@@ -222,7 +223,7 @@ async def scheduler_loop():
     
     while True:
         try:
-            now = datetime.now()
+            now = datetime.now(ZoneInfo("Asia/Kolkata")) # Use exchange's timezone
             current_hour = now.hour
             current_minute = now.minute
             current_date_str = now.strftime("%Y-%m-%d")
