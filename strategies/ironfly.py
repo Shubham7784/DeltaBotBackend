@@ -8,7 +8,7 @@ class IronFlyStrategy:
         self.active_legs = [] # Load any existing legs from paper engine on startup
         self.client = DeltaClient()
 
-    async def execute(self, current_price: float, wing_width: float = 1000.0):
+    async def execute(self, current_price: float, wing_width: float = 400.0):
         if self.active_legs:
             return False, "Strategy already active"
 

@@ -250,7 +250,7 @@ class PaperTradingEngine:
         }
         
         conn = self.get_connection()
-        if(config.IS_PAPER_TRADING):
+        if(not config.IS_PAPER_TRADING):
             if("BTC" in order.get("symbol")):
                 size = size * self.size_map["BTC"] # Convert to contract size for BTC
             elif("ETH" in order.get("symbol")):
