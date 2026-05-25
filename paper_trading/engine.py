@@ -251,18 +251,18 @@ class PaperTradingEngine:
         
         conn = self.get_connection()
         if(config.IS_PAPER_TRADING):
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cursor.execute('''
-                INSERT INTO positions (id, symbol, side, entryPrice, currentPrice, size, leverage, margin, unrealized_pnl, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (pos_id, order.get("symbol"), side, price, price, size, leverage, margin_req, 0.0, time.time()))
-            conn.commit()
-        else:
             if("BTC" in order.get("symbol")):
                 size = size * self.size_map["BTC"] # Convert to contract size for BTC
             elif("ETH" in order.get("symbol")):
                 size = size * self.size_map["ETH"] # Convert to contract size for ETH
             await self.client.open_live_position(order, side, size, price, leverage) # Placeholder for live trading logic
+        
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor.execute('''
+            INSERT INTO positions (id, symbol, side, entryPrice, currentPrice, size, leverage, margin, unrealized_pnl, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (pos_id, order.get("symbol"), side, price, price, size, leverage, margin_req, 0.0, time.time()))
+        conn.commit()    
         conn.close()
         return position
 
@@ -275,7 +275,6 @@ class PaperTradingEngine:
                 print("Closing all live positions")
             else:
                 print("Error closing live positions: ", response.get("success"))
-            return
         conn = self.get_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         # 1. Archive current positions to trade_history

@@ -115,7 +115,7 @@ async def run_strategy1():
 @app.post("/api/strategy2/enable")
 async def enable_strategy2():
     risk_manager.directional_enabled = True
-    trade_placed = await directional_strategy.run(paper_engine.btc_price)
+    trade_placed = await directional_strategy.generate_signal(paper_engine.btc_price)
     if trade_placed:
         return {"status": "enabled"}
     risk_manager.directional_enabled = False
@@ -190,6 +190,8 @@ async def market_loop():
             except Exception as e:
                 print(f"Error syncing real wallet: {e}")
 
+            #5. Run directional strategy logic to check for any new signals and manage positions accordingly
+            risk_manager.directional_enabled = await directional_strategy.generate_signal(paper_engine.btc_price)
             # 5. Risk & Hedge rebalance
             greeks = await risk_manager.get_greeks()
             await hedge_manager.rebalance(greeks.get("delta", 0.0), paper_engine.btc_price)
@@ -271,16 +273,6 @@ async def startup():
     asyncio.create_task(market_loop())
     asyncio.create_task(scheduler_loop())
 
-# Static Files
-if os.path.exists("dist"):
-    if os.path.exists("dist/assets"):
-        app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
-        
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        if full_path.startswith("api") or full_path == "ws":
-            return None # let fastapi handle it
-        return FileResponse("dist/index.html")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=3000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

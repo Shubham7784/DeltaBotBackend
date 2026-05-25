@@ -2,18 +2,20 @@ from paper_trading.engine import paper_engine
 from risk.manager import risk_manager
 import time
 from exchange.market_data import market_data
+import pandas as pd
 
 class DirectionalStrategy:
     def __init__(self):
         self.prices_history = []
         self.last_signal = "NEUTRAL"
         self.active_position_id = None
-
-    async def run(self, btc_price: float, price_map: dict = None):
+    
+    async def generate_signal(self, btc_price: float):
+        result = False
         if not btc_price or btc_price <= 0:
             return
 
-        market_data.get_historical_ohlc_candles("BTCUSD","4h") # Ensure we have candles for EMA calculation
+        await market_data.get_historical_ohlc_candles("BTCUSD","1h") # Ensure we have candles for EMA calculation
         if(len(market_data.ohlc_candles)==0):
             print("Not enough candles to calculate EMA")
             return 
@@ -23,13 +25,16 @@ class DirectionalStrategy:
         # Determine signal based on EMA trend
         buffer = 5.0 # small noise filter
         ema_trend = ema_9 - ema_20
-        if ema_trend > 0 and btc_price > ema_9 + buffer:
-            self.last_signal = "BULLISH"
-        elif ema_trend < 0 and btc_price < ema_9 - buffer:
-            self.last_signal = "BEARISH" 
+        if ema_trend > 0 and ema_9 + 300 <=btc_price:
+            result = await self.run(btc_price,"BULLISH")
+        elif ema_trend < 0 and ema_9 - 300 >= btc_price:
+            result = await self.run(btc_price,"BEARISH")
         else:
             self.last_signal = "NEUTRAL"
+            print("No trades are placed as the signal is NEUTRAL")
+        return result
 
+    async def run(self, btc_price: float,trend_signal:str):
         # Check existing positions database to see if we have an active position
         positions = await paper_engine.get_positions()
         active_pos = None
@@ -103,8 +108,9 @@ class DirectionalStrategy:
 
     def calculate_ema(self,ema_length:int):
         k = 2/(ema_length + 1)
-        sma = sum([candle["close"] for candle in market_data.ohlc_candles[:ema_length]])/ema_length
-        ema = (paper_engine.btc_price*k)+(sma*(1-k))
-        return ema
+        candles = [candle['close'] for candle in market_data.ohlc_candles]
+        df = pd.DataFrame(candles, columns=['close'])
+        df[f'EMA_{ema_length}'] = df['close'].ewm(span=ema_length, adjust=False).mean()
+        return df[f'EMA_{ema_length}'].iloc[-1]
     
 directional_strategy = DirectionalStrategy()
