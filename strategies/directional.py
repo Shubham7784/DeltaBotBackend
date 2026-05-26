@@ -9,29 +9,72 @@ class DirectionalStrategy:
         self.prices_history = []
         self.last_signal = "NEUTRAL"
         self.active_position_id = None
+        self.pending_signal = None  # Stores "BULLISH" or "BEARISH" when 30min crossover detected
+        self.pending_ema9_5min = None  # Stores the EMA9 value from 5min when signal detected
+        self.crossover_threshold = 2  # Small threshold to confirm crossover
     
     async def generate_signal(self, btc_price: float):
         result = False
         if not btc_price or btc_price <= 0:
             return
 
-        await market_data.get_historical_ohlc_candles("BTCUSD","1h") # Ensure we have candles for EMA calculation
-        if(len(market_data.ohlc_candles)==0):
-            print("Not enough candles to calculate EMA")
-            return 
+        # Get 30min candles for EMA9/EMA20 crossover detection
+        await market_data.get_historical_ohlc_candles("BTCUSD", "30m")
+        if len(market_data.ohlc_candles) == 0:
+            print("Not enough candles to calculate EMA on 30min")
+            return
 
-        ema_9 = self.calculate_ema(9)
-        ema_20 = self.calculate_ema(20)
-        # Determine signal based on EMA trend
-        buffer = 5.0 # small noise filter
-        ema_trend = ema_9 - ema_20
-        if ema_trend > 0 and ema_9 + 300 <=btc_price:
-            result = await self.run(btc_price,"BULLISH")
-        elif ema_trend < 0 and ema_9 - 300 >= btc_price:
-            result = await self.run(btc_price,"BEARISH")
-        else:
-            self.last_signal = "NEUTRAL"
-            print("No trades are placed as the signal is NEUTRAL")
+        # Stage 1: Check for EMA9/EMA20 crossover on 30min candle (if no pending signal)
+        if self.pending_signal is None:
+            ema_9_30m = self.calculate_ema(9, market_data.ohlc_candles)
+            ema_20_30m = self.calculate_ema(20, market_data.ohlc_candles)
+            ema_trend = ema_9_30m - ema_20_30m
+            
+            print(f"[Directional Strategy] 30min - EMA9: {ema_9_30m:.2f}, EMA20: {ema_20_30m:.2f}, Trend: {ema_trend:.2f}")
+            
+            # Detect crossover (EMA9 crosses above/below EMA20)
+            if ema_trend > self.crossover_threshold and btc_price <= ema_9_30m + 100:
+                print(f"[Directional Strategy] BULLISH crossover detected on 30min at price {btc_price}")
+                self.pending_signal = "BULLISH"
+                # Get 5min EMA9 to track for price crossing
+                await market_data.get_historical_ohlc_candles("BTCUSD", "5m")
+                if len(market_data.ohlc_candles) > 0:
+                    self.pending_ema9_5min = self.calculate_ema(9, market_data.ohlc_candles)
+                    print(f"[Directional Strategy] Waiting for price to cross above EMA9(5min): {self.pending_ema9_5min:.2f}")
+                    
+            elif ema_trend < -self.crossover_threshold and btc_price >= ema_9_30m - 100:
+                print(f"[Directional Strategy] BEARISH crossover detected on 30min at price {btc_price}")
+                self.pending_signal = "BEARISH"
+                # Get 5min EMA9 to track for price crossing
+                await market_data.get_historical_ohlc_candles("BTCUSD", "5m")
+                if len(market_data.ohlc_candles) > 0:
+                    self.pending_ema9_5min = self.calculate_ema(9, market_data.ohlc_candles)
+                    print(f"[Directional Strategy] Waiting for price to cross below EMA9(5min): {self.pending_ema9_5min:.2f}")
+            else:
+                self.last_signal = "NEUTRAL"
+        
+        # Stage 2: Wait for price to cross EMA9 on 5min candle
+        elif self.pending_signal is not None and self.pending_ema9_5min is not None:
+            # Get fresh 5min candles
+            await market_data.get_historical_ohlc_candles("BTCUSD", "5m")
+            
+            price_crossed = False
+            if self.pending_signal == "BULLISH" and btc_price > self.pending_ema9_5min:
+                print(f"[Directional Strategy] Price crossed above 5min EMA9! Current: {btc_price}, EMA9: {self.pending_ema9_5min:.2f}")
+                price_crossed = True
+                self.last_signal = "BULLISH"
+            elif self.pending_signal == "BEARISH" and btc_price < self.pending_ema9_5min:
+                print(f"[Directional Strategy] Price crossed below 5min EMA9! Current: {btc_price}, EMA9: {self.pending_ema9_5min:.2f}")
+                price_crossed = True
+                self.last_signal = "BEARISH"
+            
+            # If price crossed, execute trade
+            if price_crossed:
+                self.pending_signal = None
+                self.pending_ema9_5min = None
+                result = await self.run(btc_price, self.last_signal)
+                return result
+        
         return result
 
     async def run(self, btc_price: float,trend_signal:str):
@@ -105,11 +148,17 @@ class DirectionalStrategy:
     def reset(self):
         self.active_position_id = None
         self.last_signal = "NEUTRAL"
+        self.pending_signal = None
+        self.pending_ema9_5min = None
 
-    def calculate_ema(self,ema_length:int):
-        k = 2/(ema_length + 1)
-        candles = [candle['close'] for candle in market_data.ohlc_candles]
-        df = pd.DataFrame(candles, columns=['close'])
+    def calculate_ema(self, ema_length: int, candles=None):
+        """Calculate EMA for given candles. If candles not provided, uses global market_data.ohlc_candles"""
+        if candles is None:
+            candles = market_data.ohlc_candles
+        
+        k = 2 / (ema_length + 1)
+        prices = [candle['close'] for candle in candles]
+        df = pd.DataFrame(prices[::-1], columns=['close'])
         df[f'EMA_{ema_length}'] = df['close'].ewm(span=ema_length, adjust=False).mean()
         return df[f'EMA_{ema_length}'].iloc[-1]
     

@@ -2,7 +2,7 @@ from exchange.client import DeltaClient
 from core.config import config
 import asyncio
 import time
-import datetime
+from datetime import datetime, timedelta
 
 class MarketDataService:
     def __init__(self):
@@ -24,7 +24,7 @@ class MarketDataService:
             self.eth_futures = [i for i in self.instruments if i.get("symbol","") == "ETHUSD"]
             self.eth_options = [i for i in self.instruments if ("P-ETH-" in i.get("symbol","") or "C-ETH-" in i.get("symbol",""))]
             self.btc_daily_straddle = [i for i in self.instruments if i.get("description","") == "BTC Daily Straddle"]
-            historical_candles = await self.get_historical_ohlc_candles("BTCUSD","1h")
+            historical_candles = await self.get_historical_ohlc_candles("BTCUSD","30m")
             self.ohlc_candles = historical_candles
         except Exception as e:
             print(f"Error initializing market data: {e}")
@@ -67,7 +67,7 @@ class MarketDataService:
         params = {
             'symbol': symbol,
             'resolution': resolution,
-            'start': int(time.time()) - 40*1*60*60, # Last 40 candles for 1h resolution
+            'start': int((datetime.now() - timedelta(hours=20)).timestamp()), # Last 40 candles for 1h resolution
             'end': int(time.time())
         }
         ohcl = await self.client.request("GET", "/v2/history/candles", params=params)

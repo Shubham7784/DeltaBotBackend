@@ -60,9 +60,6 @@ class DeltaClient:
                 content=body_str if data else None,
                 headers=headers
             )
-            if("orders" in path or "margined" in path):
-                print(response.text) # Debugging line to print raw response
-
             response.raise_for_status()
             res_json = response.json()
             # Delta V2 responses are usually wrapped: {"success": true, "data": ...}
