@@ -38,11 +38,11 @@ class MarketDataService:
             return []
 
     def get_nearest_expiry(self):
-        expiries = sorted(list(set([datetime.datetime.strptime(o.get("symbol").split("-")[-1],"%d%m%y") for o in self.btc_options if o.get("symbol")])))
+        expiries = sorted(list(set([datetime.strptime(o.get("symbol").split("-")[-1],"%d%m%y") for o in self.btc_options if o.get("symbol")])))
         return expiries[0] if expiries else None
 
     def get_options_by_expiry(self, expiry: str):
-        return [o for o in self.btc_options if o.get("symbol").endswith(datetime.datetime.strftime(expiry,"%d%m%y"))]
+        return [o for o in self.btc_options if o.get("symbol").endswith(datetime.strftime(expiry,"%d%m%y"))]
 
     async def get_live_price(self, symbol: str = "BTCUSD"):
         try:
