@@ -28,9 +28,14 @@ class RiskManager:
                 continue # Skip futures for greeks calculation
             ticker = await self.client.get_ticker(pos["symbol"])
             greeks = ticker.get("result", {}).get("greeks", {})
-            delta = float(greeks.get("delta", 0))
-            gamma = float(greeks.get("gamma", 0))
-            theta = float(greeks.get("theta", 0))
+            if(greeks!=None):
+                delta = float(greeks.get("delta", 0))
+                gamma = float(greeks.get("gamma", 0))
+                theta = float(greeks.get("theta", 0))
+            else:
+                delta = 0.0
+                gamma = 0.0
+                theta = 0.0
             size = pos["size"]*paper_engine.size_map["BTC"] if("BTC" in pos["symbol"]) else pos["size"]*paper_engine.size_map[pos["ETH"]] # Adjust size for BTC if needed
             total_delta += delta/size
             total_gamma += gamma/size

@@ -89,7 +89,7 @@ async def get_options_chain(expiry: str = None):
 
 @app.get("/api/trade-history")
 async def get_trade_history():
-    return await paper_engine.get_trade_history()
+    return paper_engine.get_trade_history()
 
 @app.get("/api/scheduler")
 async def get_scheduler_status():
@@ -208,8 +208,10 @@ async def market_loop():
                     "netDelta": greeks.get("delta", 0.0),
                     "netGamma": greeks.get("gamma", 0.0),
                     "netTheta": greeks.get("theta", 0.0),
-                    "directionalEnabled": risk_manager.directional_enabled
-                }
+                },
+                "directionalEnabled": risk_manager.directional_enabled,
+                "isPaperTrading":config.IS_PAPER_TRADING,
+                "marketTrend":directional_strategy.last_signal
             }
             await manager.broadcast(json.dumps(payload))
         except Exception as e:
