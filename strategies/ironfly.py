@@ -1,3 +1,4 @@
+from core import config
 from exchange.market_data import market_data
 from paper_trading.engine import paper_engine
 import math
@@ -52,7 +53,7 @@ class IronFlyStrategy:
             side = "SHORT" if abs(float(inst.get("strike_price"))-center_strike)<=100 else "LONG" # Logic check
             # For simplicity in V1 Python port:
             live_price = await self.client.get_product_price(inst.get("symbol"))
-            await paper_engine.open_position(inst, side, 0.001, live_price, 200)
+            await paper_engine.open_position(inst, side, 0.001, live_price, config.OPTION_LEVERAGE) # Use config for leverage
             time.sleep(7)
         
         self.active_legs = [i.get("symbol") for i in found_legs]

@@ -1,3 +1,5 @@
+from uvicorn import config
+
 from paper_trading.engine import paper_engine
 
 class HedgeManager:
@@ -9,12 +11,12 @@ class HedgeManager:
             if abs(net_delta) < -0.20:
                 needed_size = paper_engine.size
                 side = "buy"
-                pos = await paper_engine.open_position("BTCUSD", side, needed_size, current_price, 20)
+                pos = await paper_engine.open_position("BTCUSD", side, needed_size, current_price,config.FUTURE_LEVERAGE)
                 self.active_hedge.append(pos["id"])
             elif abs(net_delta) > 0.20:
                 needed_size = paper_engine.size
                 side = "sell"
-                pos = await paper_engine.open_position("BTCUSD", side, needed_size, current_price, 20)
+                pos = await paper_engine.open_position("BTCUSD", side, needed_size, current_price, config.FUTURE_LEVERAGE)
                 self.active_hedge.append(pos["id"])
             else:
             # Close existing hedge

@@ -14,4 +14,7 @@ class Config:
     BASE_URL = "https://cdn-ind.testnet.deltaex.org"
     DATABASE_URL = os.getenv("DATABASE_URL", "")
 
+    FUTURE_LEVERAGE = int(os.getenv("FUTURE_LEVERAGE", 100))
+    OPTION_LEVERAGE = int(os.getenv("OPTION_LEVERAGE", 100))
+
 config = Config()

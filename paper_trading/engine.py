@@ -15,8 +15,8 @@ class PaperTradingEngine:
         self.btc_price = 65000.0
         self.real_wallet_data = {}
         self.client = DeltaClient()
-        self.size_map = {"BTC":1000,
-                         "ETH":100}
+        self.size_map = {"BTCUSD":1000,
+                         "ETHUSD":100}
         self.size = 0
 
     def get_connection(self):
@@ -132,6 +132,7 @@ class PaperTradingEngine:
             self.client.user_id = live_pos.get("result", [{}])[0].get("user_id", 0) if live_pos.get("result") else 0
             for pos in live_pos.get("result", []):
                 self.size = pos.get("size", 0)
+                lot_size = self.size_map.get("BTCUSD") if("BTC" in pos.get("product_symbol", "")) else self.size_map.get("ETHUSD") if("ETH" in pos.get("product_symbol", "")) else 1
                 positions.append({
                     "id": pos.get("product_id"),
                     "symbol": pos.get("product_symbol"),
@@ -141,7 +142,7 @@ class PaperTradingEngine:
                     "size": float(pos.get("size", 0)),
                     "leverage": float(pos.get("leverage", 0)),
                     "margin": float(pos.get("margin", 0)),
-                    "unrealizedPnL": float(pos.get("realized_cashflow", 0)) - float(pos.get("unrealized_pnl", 0)),
+                    "unrealizedPnL": ((float(pos.get("mark_price",0)) - float(pos.get("entry_price", 0))) / (lot_size * int(pos.get("size", 0)))) if(int(pos.get("size", 0))>0) else -((float(pos.get("mark_price",0)) - float(pos.get("entry_price", 0))) / (lot_size * int(pos.get("size", 0)))),
                     "contractType": pos.get("product", {}).get("contract_type"),
                     "timestamp": pos.get("timestamp")
                 })
@@ -252,9 +253,9 @@ class PaperTradingEngine:
         conn = self.get_connection()
         if(not config.IS_PAPER_TRADING):
             if("BTC" in order.get("symbol")):
-                size = size * self.size_map["BTC"] # Convert to contract size for BTC
+                size = size * self.size_map["BTCUSD"] # Convert to contract size for BTC
             elif("ETH" in order.get("symbol")):
-                size = size * self.size_map["ETH"] # Convert to contract size for ETH
+                size = size * self.size_map["ETHUSD"] # Convert to contract size for ETH
             await self.client.open_live_position(order, side, size, price, leverage) # Placeholder for live trading logic
         
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)

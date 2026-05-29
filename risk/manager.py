@@ -36,7 +36,7 @@ class RiskManager:
                 delta = 0.0
                 gamma = 0.0
                 theta = 0.0
-            size = pos["size"]*paper_engine.size_map["BTC"] if("BTC" in pos["symbol"]) else pos["size"]*paper_engine.size_map[pos["ETH"]] # Adjust size for BTC if needed
+            size = pos["size"]*paper_engine.size_map["BTCUSD"] if("BTC" in pos["symbol"]) else pos["size"]*paper_engine.size_map["ETHUSD"] # Adjust size for BTC if needed
             total_delta += delta/size
             total_gamma += gamma/size
             total_theta += theta/size
