@@ -1,4 +1,4 @@
-from core import config
+from core.config import config
 from paper_trading.engine import paper_engine
 from risk.manager import risk_manager
 import time

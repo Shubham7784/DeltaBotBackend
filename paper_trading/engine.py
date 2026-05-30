@@ -131,7 +131,6 @@ class PaperTradingEngine:
             live_pos = await self.client.get_live_positions()
             self.client.user_id = live_pos.get("result", [{}])[0].get("user_id", 0) if live_pos.get("result") else 0
             for pos in live_pos.get("result", []):
-                self.size = pos.get("size", 0)
                 lot_size = self.size_map.get("BTCUSD") if("BTC" in pos.get("product_symbol", "")) else self.size_map.get("ETHUSD") if("ETH" in pos.get("product_symbol", "")) else 1
                 positions.append({
                     "id": pos.get("product_id"),
@@ -142,7 +141,7 @@ class PaperTradingEngine:
                     "size": float(pos.get("size", 0)),
                     "leverage": float(pos.get("leverage", 0)),
                     "margin": float(pos.get("margin", 0)),
-                    "unrealizedPnL": ((float(pos.get("mark_price",0)) - float(pos.get("entry_price", 0))) / (lot_size * int(pos.get("size", 0)))) if(int(pos.get("size", 0))>0) else -((float(pos.get("mark_price",0)) - float(pos.get("entry_price", 0))) / (lot_size * int(pos.get("size", 0)))),
+                    "unrealizedPnL": ((float(pos.get("mark_price",0)) - float(pos.get("entry_price", 0))) / (lot_size * int(pos.get("size", 0)))),
                     "contractType": pos.get("product", {}).get("contract_type"),
                     "timestamp": pos.get("timestamp")
                 })

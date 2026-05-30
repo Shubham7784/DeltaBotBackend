@@ -163,7 +163,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def market_loop():
     ip = requests.get("https://api.ipify.org").text
-    print(ip)
+    print(f"Public IP: {ip}")
     while True:
         try:
             # 1. Fetch all tickers from Delta to get prices for all symbols
@@ -232,7 +232,7 @@ async def scheduler_loop():
             
             # Active time window: 07:00 AM to 09:00 AM (inclusive of 7 and 8 hours)
             print(current_hour, current_minute)
-            if (7 <= current_hour < 9) and (30 <= current_minute < 45): # Adding a minute buffer to avoid multiple triggers at the exact hour
+            if (18 <= current_hour < 20) and (45 <= current_minute < 60): # Adding a minute buffer to avoid multiple triggers at the exact hour
                 is_active = len(await paper_engine.get_positions()) > 0 or len(iron_fly.active_legs) > 0
                 
                 # Only deploy if NOT already active and not already triggered today
