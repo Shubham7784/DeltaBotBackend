@@ -68,11 +68,13 @@ async def get_positions():
 @app.get("/api/is-bot-running")
 async def is_bot_running():
     active = await paper_engine.is_ironfly_active()
+    print(f"Checking if bot is running: Iron Fly Active: {active}")
     return active
 
 @app.get("/api/is-directional-enabled")
 async def is_directional_enabled():
     active = await paper_engine.is_directional_active()
+    print(f"Checking if directional strategy is enabled: {active}")
     return active
 
 @app.get("/api/risk")
@@ -210,7 +212,6 @@ async def market_loop():
                     "netGamma": greeks.get("gamma", 0.0),
                     "netTheta": greeks.get("theta", 0.0),
                 },
-                "directionalEnabled": risk_manager.directional_enabled,
                 "isPaperTrading":config.IS_PAPER_TRADING,
                 "marketTrend":directional_strategy.last_signal
             }

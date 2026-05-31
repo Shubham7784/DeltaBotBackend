@@ -182,6 +182,18 @@ class PaperTradingEngine:
             conn.close()
         return positions
 
+    async def get_positions_from_db(self):
+        conn = self.get_connection()
+        if self.db_url:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        else:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+        cursor.execute('SELECT * FROM positions')
+        rows = cursor.fetchall()
+        positions = [dict(row) for row in rows]
+        conn.close()
+        return positions
     def get_trade_history(self):
         conn = self.get_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if self.db_url else conn.cursor()
@@ -336,14 +348,14 @@ class PaperTradingEngine:
         conn.close()
 
     async def is_ironfly_active(self):
-        positions = await self.get_positions()
+        positions = await self.get_positions_from_db()
         for pos in positions:
             if "Strategy 1" in pos.get("strategy", ""):
                 return True
         return False
     
     async def is_directional_active(self):
-        positions = await self.get_positions()
+        positions = await self.get_positions_from_db()
         for pos in positions:
             if "Strategy 2" in pos.get("strategy", ""):
                 return True
