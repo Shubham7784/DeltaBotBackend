@@ -98,14 +98,14 @@ class DirectionalStrategy:
             if not self.active_position_id:
                 if self.last_signal == "BULLISH":
                     try:
-                        pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE)
+                        pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
                         print(f"[Directional Strategy] Opened LONG position at {btc_price}")
                     except Exception as e:
                         print(f"[Directional Strategy] Failed to open LONG: {e}")
                 elif self.last_signal == "BEARISH":
                     try:
-                        pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE)
+                        pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
                         print(f"[Directional Strategy] Opened SHORT position at {btc_price}")
                     except Exception as e:
@@ -120,7 +120,7 @@ class DirectionalStrategy:
                         self.active_position_id = None
                         
                         # Open short
-                        pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE)
+                        pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE1,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
                     except Exception as e:
                         print(f"[Directional Strategy] Failed to reverse LONG to SHORT: {e}")
@@ -131,7 +131,7 @@ class DirectionalStrategy:
                         self.active_position_id = None
                         
                         # Open long
-                        pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE)
+                        pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
                     except Exception as e:
                         print(f"[Directional Strategy] Failed to reverse SHORT to LONG: {e}")

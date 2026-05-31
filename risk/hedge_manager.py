@@ -10,12 +10,12 @@ class HedgeManager:
             if abs(net_delta) < -0.20:
                 needed_size = paper_engine.size
                 side = "buy"
-                pos = await paper_engine.open_position("BTCUSD", side, needed_size, current_price,config.FUTURE_LEVERAGE)
+                pos = await paper_engine.open_position("BTCUSD", side, needed_size, current_price,config.FUTURE_LEVERAGE,"Strategy 1 Hedge")
                 self.active_hedge.append(pos["id"])
             elif abs(net_delta) > 0.20:
                 needed_size = paper_engine.size
                 side = "sell"
-                pos = await paper_engine.open_position("BTCUSD", side, needed_size, current_price, config.FUTURE_LEVERAGE)
+                pos = await paper_engine.open_position("BTCUSD", side, needed_size, current_price, config.FUTURE_LEVERAGE,"Strategy 1 Hedge")
                 self.active_hedge.append(pos["id"])
             else:
             # Close existing hedge

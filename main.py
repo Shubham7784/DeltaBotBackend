@@ -67,12 +67,13 @@ async def get_positions():
 
 @app.get("/api/is-bot-running")
 async def is_bot_running():
-    positions = await paper_engine.get_positions()
-    return len(positions) > 0 or len(iron_fly.active_legs) > 0
+    active = await paper_engine.is_ironfly_active()
+    return active
 
 @app.get("/api/is-directional-enabled")
 async def is_directional_enabled():
-    return risk_manager.directional_enabled
+    active = await paper_engine.is_directional_active()
+    return active
 
 @app.get("/api/risk")
 async def get_risk():
@@ -232,7 +233,7 @@ async def scheduler_loop():
             
             # Active time window: 07:00 AM to 09:00 AM (inclusive of 7 and 8 hours)
             print(current_hour, current_minute)
-            if (18 <= current_hour < 20) and (45 <= current_minute < 60): # Adding a minute buffer to avoid multiple triggers at the exact hour
+            if (7 <= current_hour < 9) and (30 <= current_minute < 45): # Adding a minute buffer to avoid multiple triggers at the exact hour
                 is_active = len(await paper_engine.get_positions()) > 0 or len(iron_fly.active_legs) > 0
                 
                 # Only deploy if NOT already active and not already triggered today

@@ -41,7 +41,8 @@ class PaperTradingEngine:
                     leverage DOUBLE PRECISION,
                     margin DOUBLE PRECISION,
                     unrealized_pnl DOUBLE PRECISION,
-                    timestamp DOUBLE PRECISION
+                    timestamp DOUBLE PRECISION,
+                    strategy TEXT
                 )
             ''')
             cursor.execute('''
@@ -53,7 +54,8 @@ class PaperTradingEngine:
                     closePrice REAL,
                     size REAL,
                     pnl REAL,
-                    timestamp REAL
+                    timestamp REAL,
+                    strategy TEXT
                 )
             ''')
             cursor.execute('''
@@ -73,7 +75,8 @@ class PaperTradingEngine:
                     leverage REAL,
                     margin REAL,
                     unrealized_pnl REAL,
-                    timestamp REAL
+                    timestamp REAL,
+                    strategy TEXT
                 )
             ''')
             cursor.execute('''
@@ -85,7 +88,8 @@ class PaperTradingEngine:
                     closePrice REAL,
                     size REAL,
                     pnl REAL,
-                    timestamp REAL
+                    timestamp REAL,
+                    strategy TEXT
                 )
             ''')
             cursor.execute('''
@@ -168,7 +172,8 @@ class PaperTradingEngine:
                     "leverage": float(d.get("leverage") or 0),
                     "margin": float(d.get("margin") or 0),
                     "unrealizedPnL": float(d.get("unrealized_pnl") or 0),
-                    "timestamp": d.get("timestamp")
+                    "timestamp": d.get("timestamp"),
+                    "strategy": d.get("strategy")
                 }
             # For extreme resilience, duplicate fields if needed
             pos["entryprice"] = pos["entryPrice"]
@@ -228,7 +233,7 @@ class PaperTradingEngine:
         conn.commit()
         conn.close()
         
-    async def open_position(self, order:dict, side: str, size: float, price: float, leverage: float):
+    async def open_position(self, order:dict, side: str, size: float, price: float, leverage: float, strategy: str):
         wallet = await self.get_wallet()
         margin_req = (size * price) / leverage
         
@@ -259,9 +264,9 @@ class PaperTradingEngine:
         
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cursor.execute('''
-            INSERT INTO positions (id, symbol, side, entryPrice, currentPrice, size, leverage, margin, unrealized_pnl, timestamp)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (pos_id, order.get("symbol"), side, price, price, size, leverage, margin_req, 0.0, time.time()))
+            INSERT INTO positions (id, symbol, side, entryPrice, currentPrice, size, leverage, margin, unrealized_pnl, timestamp,strategy)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
+            ''', (pos_id, order.get("symbol"), side, price, price, size, leverage, margin_req, 0.0, time.time(),strategy))
         conn.commit()    
         conn.close()
         return position
@@ -285,8 +290,8 @@ class PaperTradingEngine:
             # In a real engine we'd pass the prices here.
             # For now let's just use the unrealized_pnl they have.
             cursor.execute('''
-                INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp, strategy)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', (
                 pos["id"], 
                 pos["symbol"], 
@@ -295,7 +300,8 @@ class PaperTradingEngine:
                 pos["currentPrice"], # Simplified: using current engine price
                 pos["size"], 
                 pos["unrealizedPnL"], 
-                time.time()
+                time.time(),
+                pos["strategy"]
             ))
         cursor.execute('DELETE FROM positions')
         conn.commit()
@@ -312,8 +318,8 @@ class PaperTradingEngine:
         
         # Archive to trade_history
         cursor.execute('''
-            INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp, strategy)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             pos["id"], 
             pos["symbol"], 
@@ -322,11 +328,26 @@ class PaperTradingEngine:
             pos["currentPrice"], # Simplified: using current engine price
             pos["size"], 
             pos["unrealizedPnL"], 
-            time.time()
+            time.time(),
+            pos["strategy"]
         ))
         cursor.execute('DELETE FROM positions WHERE id = %s', (position_id,))
         conn.commit()
         conn.close()
+
+    async def is_ironfly_active(self):
+        positions = await self.get_positions()
+        for pos in positions:
+            if "Strategy 1" in pos.get("strategy", ""):
+                return True
+        return False
+    
+    async def is_directional_active(self):
+        positions = await self.get_positions()
+        for pos in positions:
+            if "Strategy 2" in pos.get("strategy", ""):
+                return True
+        return False
 
 
 paper_engine = PaperTradingEngine()
