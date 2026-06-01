@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import requests
 from core.config import config
+from core.logging import configure_logging, log_manager
 from paper_trading.engine import paper_engine
 from risk.manager import risk_manager
 from risk.hedge_manager import hedge_manager
@@ -18,6 +19,8 @@ from exchange.market_data import market_data
 from strategies.ironfly import iron_fly
 from strategies.directional import directional_strategy
 from zoneinfo import ZoneInfo
+
+configure_logging()
 
 app = FastAPI()
 delta_client = DeltaClient()
@@ -29,26 +32,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception:
-                pass
-
-manager = ConnectionManager()
 
 # Global state to prevent duplicate triggering of scheduler in the same 7-9 AM hour window per calendar day
 last_scheduler_run_date = None
@@ -152,17 +135,21 @@ async def close_all_endpoint():
             "directionalEnabled": False
         }
     }
-    await manager.broadcast(json.dumps(payload))
+    await log_manager.broadcast(payload)
     return {"status": "success"}
+
+@app.get("/api/logs")
+async def get_logs():
+    return log_manager.get_recent_messages(message_type="LOG")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    await log_manager.connect(websocket)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        log_manager.disconnect(websocket)
 
 async def market_loop():
     ip = requests.get("https://api.ipify.org").text
@@ -213,9 +200,10 @@ async def market_loop():
                     "netTheta": greeks.get("theta", 0.0),
                 },
                 "isPaperTrading":config.IS_PAPER_TRADING,
-                "marketTrend":directional_strategy.last_signal
+                "marketTrend":directional_strategy.last_signal,
+                "logs":log_manager.get_recent_messages(message_type="LOG")
             }
-            await manager.broadcast(json.dumps(payload))
+            await log_manager.broadcast(payload)
         except Exception as e:
             print(f"Error in market loop: {e}")
         
@@ -263,10 +251,18 @@ async def scheduler_loop():
                                 "directionalEnabled": False
                             }
                         }
-                        await manager.broadcast(json.dumps(payload))
+                        await log_manager.broadcast(payload)
                     else:
                         print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Auto-deployment failed/skipped: {msg}")
-            
+            elif(17<=current_hour<18) and (25<=current_minute<30):
+                # Auto-close all positions between 5:25 PM and 5:30 PM to avoid overnight risk
+                is_active = len(iron_fly.active_legs) > 0
+                if is_active:
+                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Evening time trigger hit ({current_hour}h). Auto-closing all positions to avoid overnight risk...")
+                    await paper_engine.close_all()
+                    iron_fly.reset()
+                    hedge_manager.reset()
+                    # Broadcast empty update to instantly refresh frontends
         except Exception as e:
             print(f"Error in scheduler loop: {e}")
             
