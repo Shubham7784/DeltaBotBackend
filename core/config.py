@@ -16,5 +16,9 @@ class Config:
 
     FUTURE_LEVERAGE = int(os.getenv("FUTURE_LEVERAGE", 100))
     OPTION_LEVERAGE = int(os.getenv("OPTION_LEVERAGE", 100))
+    
+    # Telegram bot configuration
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 config = Config()

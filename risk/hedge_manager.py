@@ -1,5 +1,8 @@
+import logging
 from core.config import config
 from paper_trading.engine import paper_engine
+
+logger = logging.getLogger(__name__)
 
 class HedgeManager:
     def __init__(self):
@@ -28,7 +31,7 @@ class HedgeManager:
                                 await paper_engine.close_position(self.active_hedge)
                                 self.active_hedge.pop(ah)
         except Exception as e:
-            print(f"Hedge rebalance error: {e}")
+            logger.exception("Hedge rebalance error")
 
     def reset(self):
         self.active_hedge.clear()

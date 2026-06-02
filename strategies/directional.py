@@ -1,9 +1,12 @@
+import logging
 from core.config import config
 from paper_trading.engine import paper_engine
 from risk.manager import risk_manager
 import time
 from exchange.market_data import market_data
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 class DirectionalStrategy:
     def __init__(self):
@@ -23,7 +26,7 @@ class DirectionalStrategy:
         # Get 30min candles for EMA9/EMA20 crossover detection
         await market_data.get_historical_ohlc_candles("BTCUSD", "30m")
         if len(market_data.ohlc_candles) == 0:
-            print("Not enough candles to calculate EMA on 30min")
+            logger.warning("Not enough candles to calculate EMA on 30min")
             return
 
         # Stage 1: Check for EMA9/EMA20 crossover on 30min candle (if no pending signal)
@@ -32,29 +35,29 @@ class DirectionalStrategy:
             ema_20_30m = self.calculate_ema(20, market_data.ohlc_candles)
             ema_trend = ema_9_30m - ema_20_30m
             
-            print(f"[Directional Strategy] 30min - EMA9: {ema_9_30m:.2f}, EMA20: {ema_20_30m:.2f}, Trend: {ema_trend:.2f}")
+            logger.debug("[Directional Strategy] 30min - EMA9: %.2f, EMA20: %.2f, Trend: %.2f", ema_9_30m, ema_20_30m, ema_trend)
             
             # Detect crossover (EMA9 crosses above/below EMA20)
             if (self.crossover_threshold_lower <= ema_trend <= self.crossover_threshold_upper) and btc_price <= ema_9_30m + 100:
-                print(f"[Directional Strategy] BULLISH crossover detected on 30min at price {btc_price}")
+                logger.info("[Directional Strategy] BULLISH crossover detected on 30min at price %s", btc_price)
                 self.pending_signal = "BULLISH"
                 # Get 5min EMA9 to track for price crossing
                 await market_data.get_historical_ohlc_candles("BTCUSD", "5m")
                 if len(market_data.ohlc_candles) > 0:
                     self.pending_ema9_5min = self.calculate_ema(9, market_data.ohlc_candles)
-                    print(f"[Directional Strategy] Waiting for price to cross above EMA9(5min): {self.pending_ema9_5min:.2f}")
+                    logger.info("[Directional Strategy] Waiting for price to cross above EMA9(5min): %.2f", self.pending_ema9_5min)
                     
             elif (-self.crossover_threshold_upper <= ema_trend <= -self.crossover_threshold_lower) and btc_price >= ema_9_30m - 100:
-                print(f"[Directional Strategy] BEARISH crossover detected on 30min at price {btc_price}")
+                logger.info("[Directional Strategy] BEARISH crossover detected on 30min at price %s", btc_price)
                 self.pending_signal = "BEARISH"
                 # Get 5min EMA9 to track for price crossing
                 await market_data.get_historical_ohlc_candles("BTCUSD", "5m")
                 if len(market_data.ohlc_candles) > 0:
                     self.pending_ema9_5min = self.calculate_ema(9, market_data.ohlc_candles)
-                    print(f"[Directional Strategy] Waiting for price to cross below EMA9(5min): {self.pending_ema9_5min:.2f}")
+                    logger.info("[Directional Strategy] Waiting for price to cross below EMA9(5min): %.2f", self.pending_ema9_5min)
             else:
                 self.last_signal = "NEUTRAL"
-                print(self.last_signal)
+                logger.debug("[Directional Strategy] No crossover detected: %s", self.last_signal)
         
         # Stage 2: Wait for price to cross EMA9 on 5min candle
         elif self.pending_signal is not None and self.pending_ema9_5min is not None:
@@ -63,11 +66,11 @@ class DirectionalStrategy:
             
             price_crossed = False
             if self.pending_signal == "BULLISH" and btc_price > self.pending_ema9_5min:
-                print(f"[Directional Strategy] Price crossed above 5min EMA9! Current: {btc_price}, EMA9: {self.pending_ema9_5min:.2f}")
+                logger.info("[Directional Strategy] Price crossed above 5min EMA9. Current: %s, EMA9: %.2f", btc_price, self.pending_ema9_5min)
                 price_crossed = True
                 self.last_signal = "BULLISH"
             elif self.pending_signal == "BEARISH" and btc_price < self.pending_ema9_5min:
-                print(f"[Directional Strategy] Price crossed below 5min EMA9! Current: {btc_price}, EMA9: {self.pending_ema9_5min:.2f}")
+                logger.info("[Directional Strategy] Price crossed below 5min EMA9. Current: %s, EMA9: %.2f", btc_price, self.pending_ema9_5min)
                 price_crossed = True
                 self.last_signal = "BEARISH"
             
@@ -79,7 +82,7 @@ class DirectionalStrategy:
                 result = await self.run(btc_price, self.last_signal)
                 return result
             else:
-                print("Price has not yet crossed the 5min EMA9. Waiting...")
+                logger.debug("[Directional Strategy] Price has not yet crossed the 5min EMA9. Waiting...")
         
         return result
 
@@ -100,21 +103,21 @@ class DirectionalStrategy:
                     try:
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
-                        print(f"[Directional Strategy] Opened LONG position at {btc_price}")
+                        logger.info("[Directional Strategy] Opened LONG position at %s", btc_price)
                     except Exception as e:
-                        print(f"[Directional Strategy] Failed to open LONG: {e}")
+                        logger.exception("[Directional Strategy] Failed to open LONG")
                 elif self.last_signal == "BEARISH":
                     try:
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
-                        print(f"[Directional Strategy] Opened SHORT position at {btc_price}")
+                        logger.info("[Directional Strategy] Opened SHORT position at %s", btc_price)
                     except Exception as e:
-                        print(f"[Directional Strategy] Failed to open SHORT: {e}")
+                        logger.exception("[Directional Strategy] Failed to open SHORT")
             else:
                 # Manage position reversal
                 side = active_pos["side"]
                 if side == "LONG" and self.last_signal == "BEARISH":
-                    print(f"[Directional Strategy] Signal reversed. Reversing LONG position at {btc_price}")
+                    logger.info("[Directional Strategy] Signal reversed. Reversing LONG position at %s", btc_price)
                     try:
                         await paper_engine.close_position(self.active_position_id, btc_price)
                         self.active_position_id = None
@@ -123,9 +126,9 @@ class DirectionalStrategy:
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE1,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
                     except Exception as e:
-                        print(f"[Directional Strategy] Failed to reverse LONG to SHORT: {e}")
+                        logger.exception("[Directional Strategy] Failed to reverse LONG to SHORT")
                 elif side == "SHORT" and self.last_signal == "BULLISH":
-                    print(f"[Directional Strategy] Signal reversed. Reversing SHORT position at {btc_price}")
+                    logger.info("[Directional Strategy] Signal reversed. Reversing SHORT position at %s", btc_price)
                     try:
                         await paper_engine.close_position(self.active_position_id, btc_price)
                         self.active_position_id = None
@@ -134,21 +137,21 @@ class DirectionalStrategy:
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=0.001, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
                     except Exception as e:
-                        print(f"[Directional Strategy] Failed to reverse SHORT to LONG: {e}")
+                        logger.exception("[Directional Strategy] Failed to reverse SHORT to LONG")
         else:
             # If strategy is disabled but we still have an active position we opened, close it
             if self.active_position_id and active_pos:
-                print(f"[Directional Strategy] Strategy disabled. Closing active strategy position at {btc_price}")
+                logger.info("[Directional Strategy] Strategy disabled. Closing active strategy position at %s", btc_price)
                 try:
                     await paper_engine.close_position(self.active_position_id, btc_price)
                 except Exception as e:
-                    print(f"[Directional Strategy] Error closing position on disable: {e}")
+                    logger.exception("[Directional Strategy] Error closing position on disable")
                 self.active_position_id = None
-        if(self.active_position_id):
-            print(f"[Directional Strategy] Active position ID: {self.active_position_id}, Current Signal: {self.last_signal}")
+        if self.active_position_id:
+            logger.debug("[Directional Strategy] Active position ID: %s, Current Signal: %s", self.active_position_id, self.last_signal)
             return True
         else:
-            print(f"[Directional Strategy] No active position, Current Signal: {self.last_signal}")
+            logger.debug("[Directional Strategy] No active position, Current Signal: %s", self.last_signal)
             return False
 
     def reset(self):

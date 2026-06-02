@@ -1,9 +1,9 @@
-import uvicorn
-import os
 import asyncio
 import json
+import logging
 import random
 from datetime import datetime
+import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 import requests
 from core.config import config
 from core.logging import configure_logging, log_manager
+from core.telegram_bot import telegram_bot
 from paper_trading.engine import paper_engine
 from risk.manager import risk_manager
 from risk.hedge_manager import hedge_manager
@@ -21,6 +22,7 @@ from strategies.directional import directional_strategy
 from zoneinfo import ZoneInfo
 
 configure_logging()
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 delta_client = DeltaClient()
@@ -51,13 +53,13 @@ async def get_positions():
 @app.get("/api/is-bot-running")
 async def is_bot_running():
     active = await paper_engine.is_ironfly_active()
-    print(f"Checking if bot is running: Iron Fly Active: {active}")
+    logger.debug("Checking if bot is running: Iron Fly Active: %s", active)
     return active
 
 @app.get("/api/is-directional-enabled")
 async def is_directional_enabled():
     active = await paper_engine.is_directional_active()
-    print(f"Checking if directional strategy is enabled: {active}")
+    logger.debug("Checking if directional strategy is enabled: %s", active)
     return active
 
 @app.get("/api/risk")
@@ -153,7 +155,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def market_loop():
     ip = requests.get("https://api.ipify.org").text
-    print(f"Public IP: {ip}")
+    logger.info("Public IP: %s", ip)
     while True:
         try:
             # 1. Fetch all tickers from Delta to get prices for all symbols
@@ -179,7 +181,7 @@ async def market_loop():
                 if balances:
                     paper_engine.update_real_wallet(balances)
             except Exception as e:
-                print(f"Error syncing real wallet: {e}")
+                logger.exception("Error syncing real wallet")
 
             #5. Run directional strategy logic to check for any new signals and manage positions accordingly
             risk_manager.directional_enabled = await directional_strategy.generate_signal(paper_engine.btc_price)
@@ -205,13 +207,13 @@ async def market_loop():
             }
             await log_manager.broadcast(payload)
         except Exception as e:
-            print(f"Error in market loop: {e}")
+            logger.exception("Error in market loop")
         
         await asyncio.sleep(8)
 
 async def scheduler_loop():
     global last_scheduler_run_date
-    print("Auto-Scheduler started. Monitoring to auto-deploy Iron Fly between 07:00 AM and 09:00 AM daily.")
+    logger.info("Auto-Scheduler started. Monitoring to auto-deploy Iron Fly between 07:00 AM and 09:00 AM daily.")
     
     while True:
         try:
@@ -221,18 +223,18 @@ async def scheduler_loop():
             current_date_str = now.strftime("%Y-%m-%d")
             
             # Active time window: 07:00 AM to 09:00 AM (inclusive of 7 and 8 hours)
-            print(current_hour, current_minute)
+            logger.debug("Scheduler check time: %s:%s", current_hour, current_minute)
             if (7 <= current_hour < 9) and (30 <= current_minute < 45): # Adding a minute buffer to avoid multiple triggers at the exact hour
                 is_active = len(await paper_engine.get_positions()) > 0 or len(iron_fly.active_legs) > 0
                 
                 # Only deploy if NOT already active and not already triggered today
                 if not is_active and last_scheduler_run_date != current_date_str:
-                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Time trigger hit ({current_hour}h). Auto-deploying Iron Fly strategy...")
+                    logger.info("Scheduler auto-deploy trigger hit at %s. Auto-deploying Iron Fly strategy.", now.strftime('%Y-%m-%d %H:%M:%S'))
                     
                     # Run Strategy 1
                     success, msg = await iron_fly.execute(paper_engine.btc_price)
                     if success:
-                        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Auto-deployment successful: {msg}")
+                        logger.info("Auto-deployment successful: %s", msg)
                         last_scheduler_run_date = current_date_str
                         
                         # Immediately push update to WebSocket so the UI changes instantly
@@ -253,24 +255,25 @@ async def scheduler_loop():
                         }
                         await log_manager.broadcast(payload)
                     else:
-                        print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Auto-deployment failed/skipped: {msg}")
+                        logger.warning("Auto-deployment failed or skipped: %s", msg)
             elif(17<=current_hour<18) and (25<=current_minute<30):
                 # Auto-close all positions between 5:25 PM and 5:30 PM to avoid overnight risk
                 is_active = len(iron_fly.active_legs) > 0
                 if is_active:
-                    print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] Evening time trigger hit ({current_hour}h). Auto-closing all positions to avoid overnight risk...")
+                    logger.info("Evening auto-close trigger hit at %s. Closing positions to avoid overnight risk.", now.strftime('%Y-%m-%d %H:%M:%S'))
                     await paper_engine.close_all()
                     iron_fly.reset()
                     hedge_manager.reset()
                     # Broadcast empty update to instantly refresh frontends
         except Exception as e:
-            print(f"Error in scheduler loop: {e}")
+            logger.exception("Error in scheduler loop")
             
         await asyncio.sleep(30) # Check every 30 seconds
 
 @app.on_event("startup")
 async def startup():
     await market_data.initialize()
+    await telegram_bot.initialize()
     asyncio.create_task(market_loop())
     asyncio.create_task(scheduler_loop())
 

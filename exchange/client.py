@@ -1,10 +1,14 @@
 import hmac
 import hashlib
+import logging
 import time
 import json
 import httpx
 from core.config import config
 import random
+
+logger = logging.getLogger(__name__)
+
 class DeltaClient:
     def __init__(self):
         self.api_key = config.DELTA_API_KEY
@@ -67,7 +71,7 @@ class DeltaClient:
                 return res_json["data"]
             return res_json
         except Exception as e:
-            print(f"API Request Error: {e}")
+            logger.exception("API request error")
             raise
 
     async def get_all_tickers(self):
@@ -93,7 +97,7 @@ class DeltaClient:
     
     async def open_live_position(self, order: dict, side: str, size: float, price: float, leverage: int):
         # Placeholder for live trading logic
-        print(f"Opening live position: {order.get('symbol')} {side} {size} @ {price} with {leverage}x leverage")
+        logger.info("Opening live position: %s %s %s @ %s with %sx leverage", order.get('symbol'), side, size, price, leverage)
         client_order_id = f"deltaBot-{random.randint(1000,9999)}-{int(time.time())}"
         stop_price = 0 
         target_price = 0

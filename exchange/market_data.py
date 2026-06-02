@@ -1,8 +1,11 @@
+import logging
 from exchange.client import DeltaClient
 from core.config import config
 import asyncio
 import time
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 class MarketDataService:
     def __init__(self):
@@ -27,14 +30,14 @@ class MarketDataService:
             historical_candles = await self.get_historical_ohlc_candles("BTCUSD","30m")
             self.ohlc_candles = historical_candles
         except Exception as e:
-            print(f"Error initializing market data: {e}")
+            logger.exception("Error initializing market data")
 
     async def fetch_option_chain(self, settlement_time: str = None):
         try:
             chain = await self.client.get_option_chain("BTC", settlement_time)
             return chain
         except Exception as e:
-            print(f"Error fetching option chain: {e}")
+            logger.exception("Error fetching option chain")
             return []
 
     def get_nearest_expiry(self):
@@ -50,7 +53,7 @@ class MarketDataService:
             # Delta V2 ticker usually has 'mark_price' or 'last_price'
             return float(ticker.get("result").get("mark_price") or ticker.get("result").get("last_price") or 0)
         except Exception as e:
-            print(f"Error fetching live price for {symbol}: {e}")
+            logger.exception("Error fetching live price for %s", symbol)
             return None
         
     async def get_all_tickers(self):
@@ -58,7 +61,7 @@ class MarketDataService:
             tickers = await self.client.request("GET", "/v2/tickers")
             return tickers.get("result", [])
         except Exception as e:
-            print(f"Error fetching all tickers: {e}")
+            logger.exception("Error fetching all tickers")
             return []
         
 

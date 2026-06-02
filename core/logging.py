@@ -130,5 +130,11 @@ def configure_logging(level: int = logging.INFO) -> None:
     if not any(isinstance(handler, WebSocketLogHandler) for handler in root_logger.handlers):
         root_logger.addHandler(websocket_handler)
 
+    # Reduce noise from common library loggers while still showing warnings and errors
+    logging.getLogger("uvicorn").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     sys.stdout = StreamToLogger(root_logger, logging.INFO, sys.__stdout__)
     sys.stderr = StreamToLogger(root_logger, logging.ERROR, sys.__stderr__)

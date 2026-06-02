@@ -1,3 +1,4 @@
+import logging
 import time
 import json
 import uuid
@@ -7,6 +8,9 @@ import psycopg2.extras
 from typing import List, Dict, Optional
 from core.config import config
 from exchange.client import DeltaClient
+from core.telegram_bot import telegram_bot
+
+logger = logging.getLogger(__name__)
 
 class PaperTradingEngine:
     def __init__(self):
@@ -281,17 +285,30 @@ class PaperTradingEngine:
             ''', (pos_id, order.get("symbol"), side, price, price, size, leverage, margin_req, 0.0, time.time(),strategy))
         conn.commit()    
         conn.close()
+        
+        # Send Telegram alert
+        await telegram_bot.send_position_opened(
+            symbol=order.get("symbol"),
+            side=side,
+            size=size,
+            price=price,
+            leverage=leverage,
+            strategy=strategy
+        )
+        
+        logger.info("Position opened: %s %s %.4f @ %.2f", order.get("symbol"), side, size, price)
+        
         return position
 
     async def close_all(self):
-        if(not config.IS_PAPER_TRADING):
+        if not config.IS_PAPER_TRADING:
             # For live trading, we would need to fetch all positions and close them via API
             # This is a placeholder for that logic
             response = await self.client.close_all_live_positions()
-            if(response.get("success")):
-                print("Closing all live positions")
+            if response.get("success"):
+                logger.info("Closing all live positions")
             else:
-                print("Error closing live positions: ", response.get("success"))
+                logger.warning("Error closing live positions: %s", response.get("success"))
         conn = self.get_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         # 1. Archive current positions to trade_history
@@ -315,11 +332,24 @@ class PaperTradingEngine:
                 time.time(),
                 pos["strategy"]
             ))
+            
+            # Send Telegram alert for each closed position
+            await telegram_bot.send_position_closed(
+                symbol=pos["symbol"],
+                side=pos["side"],
+                size=pos["size"],
+                entry_price=pos["entryPrice"],
+                close_price=pos["currentPrice"],
+                pnl=pos["unrealizedPnL"],
+                strategy=pos.get("strategy", "N/A")
+            )
+            logger.info("Position closed: %s %s PnL: %.2f", pos["symbol"], pos["side"], pos["unrealizedPnL"])
+        
         cursor.execute('DELETE FROM positions')
         conn.commit()
         conn.close()    
 
-    def close_position(self, position_id: str):
+    async def close_position(self, position_id: str):
         conn = self.get_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cursor.execute('SELECT * FROM positions WHERE id = %s', (position_id,))
@@ -346,6 +376,18 @@ class PaperTradingEngine:
         cursor.execute('DELETE FROM positions WHERE id = %s', (position_id,))
         conn.commit()
         conn.close()
+        
+        # Send Telegram alert
+        await telegram_bot.send_position_closed(
+            symbol=pos["symbol"],
+            side=pos["side"],
+            size=pos["size"],
+            entry_price=pos["entryPrice"],
+            close_price=pos["currentPrice"],
+            pnl=pos["unrealizedPnL"],
+            strategy=pos.get("strategy", "N/A")
+        )
+        logger.info("Position closed: %s %s PnL: %.2f", pos["symbol"], pos["side"], pos["unrealizedPnL"])
 
     async def is_ironfly_active(self):
         positions = await self.get_positions_from_db()
