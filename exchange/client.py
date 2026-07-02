@@ -30,7 +30,7 @@ class DeltaClient:
         return hash.hexdigest()
 
     async def request(self, method: str, path: str, params: dict = None, data: dict = None, sign: bool = False):
-        timestamp = str(int(time.time()))
+        timestamp = str(int(time.time())-8)
         
         # Proper query string generation for signing
         query_str = ""

@@ -8,7 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import requests
+import httpx
 from core.config import config
 from core.logging import configure_logging, log_manager
 from core.telegram_bot import telegram_bot
@@ -154,7 +154,15 @@ async def websocket_endpoint(websocket: WebSocket):
         log_manager.disconnect(websocket)
 
 async def market_loop():
-    ip = requests.get("https://api.ipify.org").text
+    # Use async httpx to avoid blocking the event loop when fetching public IP
+    ip = "unknown"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as _client:
+            resp = await _client.get("https://api.ipify.org")
+            ip = resp.text
+    except Exception:
+        logger.debug("Unable to fetch public IP")
+
     logger.info("Public IP: %s", ip)
     while True:
         try:

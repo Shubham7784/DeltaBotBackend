@@ -25,7 +25,10 @@ class PaperTradingEngine:
 
     def get_connection(self):
         if self.db_url:
-            return psycopg2.connect(self.db_url)
+            try:
+                return psycopg2.connect(self.db_url)
+            except Exception:
+                logger.warning("Could not connect to Postgres at DATABASE_URL, falling back to local sqlite database")
         return sqlite3.connect("paper_trading.db")
 
     def _init_db(self):
