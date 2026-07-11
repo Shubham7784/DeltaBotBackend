@@ -17,6 +17,8 @@ class Config:
     FUTURE_LEVERAGE = int(os.getenv("FUTURE_LEVERAGE", 100))
     OPTION_LEVERAGE = int(os.getenv("OPTION_LEVERAGE", 100))
     LOT_SIZE = float(os.getenv("LOT_SIZE", 0.1))
+
+    POOR_MANS_LOT_SIZE = float(os.getenv("POOR_MANS_LOT_SIZE", 0.05))
     
     # Telegram bot configuration
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")

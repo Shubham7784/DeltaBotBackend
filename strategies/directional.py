@@ -44,9 +44,11 @@ class DirectionalStrategy:
             if (self.crossover_threshold_lower <= ema_trend <= self.crossover_threshold_upper) and btc_price <= ema_9_1h + 100:
                 logger.info("[Directional Strategy] BULLISH crossover detected on 1h at price %s", btc_price)
                 self.pending_signal = "BULLISH"
+                self.last_signal = "BULLISH"
             elif (-self.crossover_threshold_upper <= ema_trend <= -self.crossover_threshold_lower) and btc_price >= ema_9_1h - 100:
                 logger.info("[Directional Strategy] BEARISH crossover detected on 1h at price %s", btc_price)
                 self.pending_signal = "BEARISH"
+                self.last_signal = "BEARISH"
             else:
                 self.last_signal = "NEUTRAL"
                 logger.debug("[Directional Strategy] No crossover detected: %s", self.last_signal)

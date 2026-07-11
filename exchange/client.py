@@ -107,13 +107,13 @@ class DeltaClient:
         contract_type = order.get("product", {}).get("contractType", "") or order.get("contract_type","")
         if("perpetual" in contract_type):
             if side == "LONG":
-                stop_price = price * 0.98 # 2% stop loss
+                stop_price = price * 0.99 # 2% stop loss
                 stop_limit = stop_price - 200 # 3% stop loss limit
                 target_price = price * 1.04 # 4% take profit
                 target_limit = target_price - 200
                 
             else:
-                stop_price = price * 1.02 # 2% stop loss
+                stop_price = price * 1.01   # 2% stop loss
                 stop_limit = stop_price + 200 # 3% stop loss limit
                 target_price = price * 0.96 # 4% take profit
                 target_limit = target_price + 200

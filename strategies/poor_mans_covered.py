@@ -145,7 +145,7 @@ class PoorMansCoveredStrategy:
         if price is None:
             raise Exception(f"Could not fetch live price for {option_inst.get('symbol')}")
 
-        await paper_engine.open_position(option_inst, side, config.LOT_SIZE, price, config.OPTION_LEVERAGE, strategy)
+        await paper_engine.open_position(option_inst, side, config.POOR_MANS_LOT_SIZE, price, config.OPTION_LEVERAGE, strategy)
 
 
 poor_mans_covered_strategy = PoorMansCoveredStrategy()

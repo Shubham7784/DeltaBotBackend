@@ -152,7 +152,7 @@ class PaperTradingEngine:
                     "size": float(pos.get("size", 0)),
                     "leverage": float(pos.get("leverage", 0)),
                     "margin": float(pos.get("margin", 0)),
-                    "unrealizedPnL": ((float(pos.get("mark_price",0)) - float(pos.get("entry_price", 0))) / (lot_size * int(pos.get("size", 0)))),
+                    "unrealizedPnL": (((float(pos.get("mark_price",0)) - float(pos.get("entry_price", 0)))* float(pos.get("size", 0)) / 1000)),
                     "contractType": pos.get("product", {}).get("contract_type"),
                     "timestamp": pos.get("timestamp")
                 })
