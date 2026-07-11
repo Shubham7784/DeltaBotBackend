@@ -53,7 +53,7 @@ class IronFlyStrategy:
             side = "SHORT" if abs(float(inst.get("strike_price"))-center_strike)<=100 else "LONG" # Logic check
             # For simplicity in V1 Python port:
             live_price = await self.client.get_product_price(inst.get("symbol"))
-            await paper_engine.open_position(inst, side, 0.001, live_price,config.OPTION_LEVERAGE,"Strategy 1") # Use config for leverage
+            await paper_engine.open_position(inst, side,config.LOT_SIZE, live_price,config.OPTION_LEVERAGE,"Strategy 1") # Use config for leverage
             await asyncio.sleep(7)
         
         self.active_legs = [i.get("symbol") for i in found_legs]

@@ -19,6 +19,7 @@ from exchange.client import DeltaClient
 from exchange.market_data import market_data
 from strategies.ironfly import iron_fly
 from strategies.directional import directional_strategy
+from strategies.poor_mans_covered import poor_mans_covered_strategy
 from zoneinfo import ZoneInfo
 
 configure_logging()
@@ -116,6 +117,20 @@ async def disable_strategy2():
     directional_strategy.reset()
     return {"status": "disabled"}
 
+@app.post("/api/strategy3/run")
+async def run_poor_mans_covered_call():
+    success, msg = await poor_mans_covered_strategy.execute("CALL", paper_engine.btc_price)
+    if success:
+        return {"status": "success", "message": msg}
+    return {"status": "error", "message": msg}
+
+@app.post("/api/strategy4/run")
+async def run_poor_mans_covered_put():
+    success, msg = await poor_mans_covered_strategy.execute("PUT", paper_engine.btc_price)
+    if success:
+        return {"status": "success", "message": msg}
+    return {"status": "error", "message": msg}
+
 @app.post("/api/positions/close-all")
 async def close_all_endpoint():
     await paper_engine.close_all()
@@ -193,6 +208,23 @@ async def market_loop():
 
             #5. Run directional strategy logic to check for any new signals and manage positions accordingly
             risk_manager.directional_enabled = await directional_strategy.generate_signal(paper_engine.btc_price)
+
+            # Execute automated Poor Man's Covered based on directional trend
+            if directional_strategy.last_signal == "BULLISH":
+                if not await poor_mans_covered_strategy.is_active("CALL"):
+                    success, msg = await poor_mans_covered_strategy.execute("CALL", paper_engine.btc_price)
+                    if success:
+                        logger.info("Auto-executed Poor Man's Covered Call: %s", msg)
+                    else:
+                        logger.warning("Poor Man's Covered Call execution skipped: %s", msg)
+            elif directional_strategy.last_signal == "BEARISH":
+                if not await poor_mans_covered_strategy.is_active("PUT"):
+                    success, msg = await poor_mans_covered_strategy.execute("PUT", paper_engine.btc_price)
+                    if success:
+                        logger.info("Auto-executed Poor Man's Covered Put: %s", msg)
+                    else:
+                        logger.warning("Poor Man's Covered Put execution skipped: %s", msg)
+
             # 5. Risk & Hedge rebalance
             greeks = await risk_manager.get_greeks()
             await hedge_manager.rebalance(greeks.get("delta", 0.0), paper_engine.btc_price)
@@ -232,7 +264,7 @@ async def scheduler_loop():
             
             # Active time window: 07:00 AM to 09:00 AM (inclusive of 7 and 8 hours)
             logger.debug("Scheduler check time: %s:%s", current_hour, current_minute)
-            if (7 <= current_hour < 9) and (30 <= current_minute < 45): # Adding a minute buffer to avoid multiple triggers at the exact hour
+            if (7 <= current_hour < 13) and (30 <= current_minute < 45): # Adding a minute buffer to avoid multiple triggers at the exact hour
                 is_active = len(await paper_engine.get_positions()) > 0 or len(iron_fly.active_legs) > 0
                 
                 # Only deploy if NOT already active and not already triggered today

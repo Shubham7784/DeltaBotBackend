@@ -64,7 +64,8 @@ class DeltaClient:
                 content=body_str if data else None,
                 headers=headers
             )
-            response.raise_for_status()
+            #print(response.text)
+            response.raise_for_status()            
             res_json = response.json()
             # Delta V2 responses are usually wrapped: {"success": true, "data": ...}
             if isinstance(res_json, dict) and "data" in res_json:
