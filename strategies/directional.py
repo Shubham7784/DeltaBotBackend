@@ -119,7 +119,7 @@ class DirectionalStrategy:
                 if side == "LONG" and self.last_signal == "BEARISH":
                     logger.info("[Directional Strategy] Signal reversed. Reversing LONG position at %s", btc_price)
                     try:
-                        await paper_engine.close_position(self.active_position_id, btc_price)
+                        await paper_engine.close_position(self.active_position_id)
                         self.active_position_id = None
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
@@ -128,7 +128,7 @@ class DirectionalStrategy:
                 elif side == "SHORT" and self.last_signal == "BULLISH":
                     logger.info("[Directional Strategy] Signal reversed. Reversing SHORT position at %s", btc_price)
                     try:
-                        await paper_engine.close_position(self.active_position_id, btc_price)
+                        await paper_engine.close_position(self.active_position_id)
                         self.active_position_id = None
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
                         self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
@@ -138,7 +138,7 @@ class DirectionalStrategy:
             if self.active_position_id and active_pos:
                 logger.info("[Directional Strategy] Strategy disabled. Closing active strategy position at %s", btc_price)
                 try:
-                    await paper_engine.close_position(self.active_position_id, btc_price)
+                    await paper_engine.close_position(self.active_position_id)
                 except Exception as e:
                     logger.exception("[Directional Strategy] Error closing position on disable")
                 self.active_position_id = None
