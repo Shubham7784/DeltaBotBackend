@@ -38,6 +38,7 @@ app.add_middleware(
 
 # Global state to prevent duplicate triggering of scheduler in the same 7-9 AM hour window per calendar day
 last_scheduler_run_date = None
+last_scheduler_check_time = None
 
 @app.get("/api/health")
 async def health():
@@ -168,7 +169,57 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         log_manager.disconnect(websocket)
 
+async def run_scheduler_checks(now: datetime | None = None):
+    global last_scheduler_run_date
+
+    if now is None:
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+    current_hour = now.hour
+    current_minute = now.minute
+    current_date_str = now.strftime("%Y-%m-%d")
+
+    logger.info("Scheduler check time: %s:%s", current_hour, current_minute)
+    if (7 <= current_hour < 9) and (30 <= current_minute < 45):
+        is_active = len(await paper_engine.get_positions()) > 0 and len(iron_fly.active_legs) > 0
+
+        if not is_active and last_scheduler_run_date != current_date_str:
+            logger.info("Scheduler auto-deploy trigger hit at %s. Auto-deploying Iron Fly strategy.", now.strftime('%Y-%m-%d %H:%M:%S'))
+
+            success, msg = await iron_fly.execute(paper_engine.btc_price)
+            if success:
+                logger.info("Auto-deployment successful: %s", msg)
+                last_scheduler_run_date = current_date_str
+
+                wallet = await paper_engine.get_wallet()
+                positions = await paper_engine.get_positions()
+                greeks = await risk_manager.get_greeks()
+                payload = {
+                    "type": "MARKET_UPDATE",
+                    "data": {"symbol": "BTC", "price": paper_engine.btc_price},
+                    "wallet": wallet,
+                    "positions": positions,
+                    "risk": {
+                        "netDelta": greeks.get("delta", 0.0),
+                        "netGamma": greeks.get("gamma", 0.0),
+                        "netTheta": greeks.get("theta", 0.0),
+                        "directionalEnabled": False
+                    }
+                }
+                await log_manager.broadcast(payload)
+            else:
+                logger.warning("Auto-deployment failed or skipped: %s", msg)
+    elif (17 <= current_hour < 18) and (25 <= current_minute < 30):
+        is_active = len(iron_fly.active_legs) > 0
+        if is_active:
+            logger.info("Evening auto-close trigger hit at %s. Closing positions to avoid overnight risk.", now.strftime('%Y-%m-%d %H:%M:%S'))
+            await paper_engine.close_all()
+            iron_fly.reset()
+            hedge_manager.reset()
+
 async def market_loop():
+    global last_scheduler_check_time
+
     # Use async httpx to avoid blocking the event loop when fetching public IP
     ip = "unknown"
     try:
@@ -181,6 +232,11 @@ async def market_loop():
     logger.info("Public IP: %s", ip)
     while True:
         try:
+            now = datetime.now(ZoneInfo("Asia/Kolkata"))
+            if last_scheduler_check_time is None or (now - last_scheduler_check_time).total_seconds() >= 30:
+                last_scheduler_check_time = now
+                await run_scheduler_checks(now)
+
             # 1. Fetch all tickers from Delta to get prices for all symbols
             tickers = await market_data.get_all_tickers()
             price_map = {}
@@ -251,71 +307,13 @@ async def market_loop():
         
         await asyncio.sleep(8)
 
-async def scheduler_loop():
-    global last_scheduler_run_date
-    logger.info("Auto-Scheduler started. Monitoring to auto-deploy Iron Fly between 07:00 AM and 09:00 AM daily.")
-    
-    while True:
-        try:
-            now = datetime.now(ZoneInfo("Asia/Kolkata")) # Use exchange's timezone
-            current_hour = now.hour
-            current_minute = now.minute
-            current_date_str = now.strftime("%Y-%m-%d")
-            
-            # Active time window: 07:00 AM to 09:00 AM (inclusive of 7 and 8 hours)
-            logger.debug("Scheduler check time: %s:%s", current_hour, current_minute)
-            if (7 <= current_hour < 9) and (30 <= current_minute < 45): # Adding a minute buffer to avoid multiple triggers at the exact hour
-                is_active = len(await paper_engine.get_positions()) > 0 or len(iron_fly.active_legs) > 0
-                
-                # Only deploy if NOT already active and not already triggered today
-                if not is_active and last_scheduler_run_date != current_date_str:
-                    logger.info("Scheduler auto-deploy trigger hit at %s. Auto-deploying Iron Fly strategy.", now.strftime('%Y-%m-%d %H:%M:%S'))
-                    
-                    # Run Strategy 1
-                    success, msg = await iron_fly.execute(paper_engine.btc_price)
-                    if success:
-                        logger.info("Auto-deployment successful: %s", msg)
-                        last_scheduler_run_date = current_date_str
-                        
-                        # Immediately push update to WebSocket so the UI changes instantly
-                        wallet = await paper_engine.get_wallet()
-                        positions = await paper_engine.get_positions()
-                        greeks = await risk_manager.get_greeks()
-                        payload = {
-                            "type": "MARKET_UPDATE",
-                            "data": {"symbol": "BTC", "price": paper_engine.btc_price},
-                            "wallet": wallet,
-                            "positions": positions,
-                            "risk": {
-                                "netDelta": greeks.get("delta", 0.0),
-                                "netGamma": greeks.get("gamma", 0.0),
-                                "netTheta": greeks.get("theta", 0.0),
-                                "directionalEnabled": False
-                            }
-                        }
-                        await log_manager.broadcast(payload)
-                    else:
-                        logger.warning("Auto-deployment failed or skipped: %s", msg)
-            elif(17<=current_hour<18) and (25<=current_minute<30):
-                # Auto-close all positions between 5:25 PM and 5:30 PM to avoid overnight risk
-                is_active = len(iron_fly.active_legs) > 0
-                if is_active:
-                    logger.info("Evening auto-close trigger hit at %s. Closing positions to avoid overnight risk.", now.strftime('%Y-%m-%d %H:%M:%S'))
-                    await paper_engine.close_all()
-                    iron_fly.reset()
-                    hedge_manager.reset()
-                    # Broadcast empty update to instantly refresh frontends
-        except Exception as e:
-            logger.exception("Error in scheduler loop")
-            
-        await asyncio.sleep(30) # Check every 30 seconds
 
 @app.on_event("startup")
 async def startup():
     await market_data.initialize()
     await telegram_bot.initialize()
+    logger.info("Starting merged market and scheduler loop")
     asyncio.create_task(market_loop())
-    asyncio.create_task(scheduler_loop())
 
 
 if __name__ == "__main__":
