@@ -44,10 +44,10 @@ class ConnectionManager:
             self.disconnect(connection)
 
     def _add_history(self, payload: dict[str, Any]):
-        # Keep only non-LOG messages or LOG messages that are warnings/errors/critical
+        # Keep non-LOG messages and all LOG messages at INFO level or above
         if payload.get("type") == "LOG":
             level = payload.get("level", "INFO")
-            if level not in ("WARNING", "ERROR", "CRITICAL"):
+            if level not in ("INFO", "WARNING", "ERROR", "CRITICAL"):
                 return
 
         self.history.append(payload)
@@ -66,7 +66,7 @@ class ConnectionManager:
 
 
 class WebSocketLogHandler(logging.Handler):
-    def __init__(self, manager: ConnectionManager, min_level: int = logging.WARNING):
+    def __init__(self, manager: ConnectionManager, min_level: int = logging.INFO):
         # Handler will only broadcast records at or above min_level
         super().__init__(min_level)
         self.manager = manager
@@ -153,10 +153,10 @@ def configure_logging(level: int = logging.INFO) -> None:
     # Configure WebSocket log handler with level from config if available
     try:
         from core.config import config
-        min_level_name = getattr(config, "BROADCAST_MIN_LOG_LEVEL", "WARNING")
-        min_level = getattr(logging, str(min_level_name).upper(), logging.WARNING)
+        min_level_name = getattr(config, "BROADCAST_MIN_LOG_LEVEL", "INFO")
+        min_level = getattr(logging, str(min_level_name).upper(), logging.INFO)
     except Exception:
-        min_level = logging.WARNING
+        min_level = logging.INFO
 
     websocket_handler = WebSocketLogHandler(log_manager, min_level=min_level)
     if not any(isinstance(handler, WebSocketLogHandler) for handler in root_logger.handlers):
