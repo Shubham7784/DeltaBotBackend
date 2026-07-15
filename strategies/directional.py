@@ -10,7 +10,7 @@ class DirectionalStrategy:
     def __init__(self):
         self.prices_history = []
         self.last_signal = "NEUTRAL"
-        self.active_position_id = None
+        self.active_position = None
         self.pending_signal = None  # Stores "BULLISH" or "BEARISH" when 30m crossover detected
         self.pending_ema9_15min = None  # Stores the most recent EMA9 value for 15m
         self.last_ema9_15min = None
@@ -93,24 +93,24 @@ class DirectionalStrategy:
         # Check existing positions database to see if we have an active position
         positions = await paper_engine.get_positions()
         active_pos = None
-        if self.active_position_id:
-            active_pos = next((p for p in positions if p["id"] == self.active_position_id), None)
+        if self.active_position:
+            active_pos = next((p for p in positions if p["id"] == self.active_position), None)
             if not active_pos:
-                self.active_position_id = None
+                self.active_position = None
 
         if risk_manager.directional_enabled:
-            if not self.active_position_id:
+            if not self.active_position:
                 if self.last_signal == "BULLISH":
                     try:
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
-                        self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
+                        self.active_position = pos
                         logger.info("[Directional Strategy] Opened LONG position at %s", btc_price)
                     except Exception as e:
                         logger.exception("[Directional Strategy] Failed to open LONG")
                 elif self.last_signal == "BEARISH":
                     try:
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
-                        self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
+                        self.active_position = pos
                         logger.info("[Directional Strategy] Opened SHORT position at %s", btc_price)
                     except Exception as e:
                         logger.exception("[Directional Strategy] Failed to open SHORT")
@@ -119,38 +119,38 @@ class DirectionalStrategy:
                 if side == "LONG" and self.last_signal == "BEARISH":
                     logger.info("[Directional Strategy] Signal reversed. Reversing LONG position at %s", btc_price)
                     try:
-                        await paper_engine.close_position(self.active_position_id)
-                        self.active_position_id = None
+                        await paper_engine.close_position(self.active_position)
+                        self.active_position = None
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
-                        self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
+                        self.active_position = pos
                     except Exception as e:
                         logger.exception("[Directional Strategy] Failed to reverse LONG to SHORT")
                 elif side == "SHORT" and self.last_signal == "BULLISH":
                     logger.info("[Directional Strategy] Signal reversed. Reversing SHORT position at %s", btc_price)
                     try:
-                        await paper_engine.close_position(self.active_position_id)
-                        self.active_position_id = None
+                        await paper_engine.close_position(self.active_position)
+                        self.active_position = None
                         pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
-                        self.active_position_id = [i.get("product_id") for i in market_data.instruments if i.get("symbol") == pos.get("symbol")][0]
+                        self.active_position = pos
                     except Exception as e:
                         logger.exception("[Directional Strategy] Failed to reverse SHORT to LONG")
         else:
-            if self.active_position_id and active_pos:
+            if self.active_position and active_pos:
                 logger.info("[Directional Strategy] Strategy disabled. Closing active strategy position at %s", btc_price)
                 try:
-                    await paper_engine.close_position(self.active_position_id)
+                    await paper_engine.close_position(self.active_position)
                 except Exception as e:
                     logger.exception("[Directional Strategy] Error closing position on disable")
-                self.active_position_id = None
-        if self.active_position_id:
-            logger.debug("[Directional Strategy] Active position ID: %s, Current Signal: %s", self.active_position_id, self.last_signal)
+                self.active_position = None
+        if self.active_position:
+            logger.debug("[Directional Strategy] Active position ID: %s, Current Signal: %s", self.active_position, self.last_signal)
             return True
         else:
             logger.debug("[Directional Strategy] No active position, Current Signal: %s", self.last_signal)
             return False
 
     def reset(self):
-        self.active_position_id = None
+        self.active_position = None
         self.last_signal = "NEUTRAL"
         self.pending_signal = None
         self.pending_ema9_15min = None
@@ -176,5 +176,8 @@ class DirectionalStrategy:
         }
         return ema
     
+    async def get_active_position(self):
+        pos = await paper_engine.get_positions_from_db()
+        self.active_position = next((p for p in pos if p["strategy"] == "Strategy 2"), None)
 
 directional_strategy = DirectionalStrategy()

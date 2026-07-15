@@ -59,7 +59,11 @@ class IronFlyStrategy:
         self.active_legs = [i.get("symbol") for i in found_legs]
         return True, "Executed"
 
-    def reset(self):
+    async def reset(self):
         self.active_legs = []
+
+    async def get_active_legs(self):
+        pos = await paper_engine.get_positions_from_db()
+        self.active_legs = [p for p in pos if p["strategy"] == "Strategy 1"]
 
 iron_fly = IronFlyStrategy()

@@ -352,59 +352,64 @@ class PaperTradingEngine:
         conn.commit()
         conn.close()    
 
-    async def close_position(self, position_id: str):
+    async def close_position(self, strategy_name: str):
         conn = self.get_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cursor.execute('SELECT * FROM positions WHERE id = %s', (position_id,))
-        pos = cursor.fetchone()
-        if not pos:
+        cursor.execute('SELECT * FROM positions WHERE strategy = %s', (strategy_name,))
+        db_pos = cursor.fetchall()
+        if not db_pos:
             conn.close()
             raise Exception("Position not found")
-        
+        live_pos = await self.client.get_live_positions()
+        if live_pos and "result" in live_pos:
+            for p in live_pos["result"]:
+                for db in db_pos:
+                    if p.get("product_symbol") == db.get("symbol"):
+                        logger.info("Closing live position for %s", p.get("product_symbol"),"live pos",p.get("size"))
+                        await self.client.close_live_position(p)
+        else:
+            live_pos = []
         # Archive to trade_history
-        cursor.execute('''
-            INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp, strategy)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            pos["id"], 
-            pos["symbol"], 
-            pos["side"], 
-            pos["entryPrice"], 
-            pos["currentPrice"], # Simplified: using current engine price
-            pos["size"], 
-            pos["unrealizedPnL"], 
-            time.time(),
-            pos["strategy"]
-        ))
-        cursor.execute('DELETE FROM positions WHERE id = %s', (position_id,))
+        for db in db_pos:
+            cursor.execute('''
+                INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp, strategy)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                db["id"], 
+                db["symbol"], 
+                db["side"], 
+                db["entryprice"], 
+                db["currentprice"], # Simplified: using current engine price
+                db["size"], 
+                db["unrealized_pnl"], 
+                time.time(),
+                db["strategy"]
+            ))
+            # Send Telegram alert
+            await telegram_bot.send_position_closed(
+                symbol=db["symbol"],
+                side=db["side"],
+                size=db["size"],
+                entry_price=db["entryprice"],
+                close_price=db["currentprice"],
+                pnl=db["unrealized_pnl"],
+                strategy=db.get("strategy", "N/A")
+            )
+            logger.info("Position closed: %s %s PnL: %.2f", db["symbol"], db["side"], db["unrealized_pnl"])
+        cursor.execute('DELETE FROM positions WHERE strategy = %s', (strategy_name,))
         conn.commit()
         conn.close()
         
-        # Send Telegram alert
-        await telegram_bot.send_position_closed(
-            symbol=pos["symbol"],
-            side=pos["side"],
-            size=pos["size"],
-            entry_price=pos["entryPrice"],
-            close_price=pos["currentPrice"],
-            pnl=pos["unrealizedPnL"],
-            strategy=pos.get("strategy", "N/A")
-        )
-        logger.info("Position closed: %s %s PnL: %.2f", pos["symbol"], pos["side"], pos["unrealizedPnL"])
+        
 
     async def is_ironfly_active(self):
         positions = await self.get_positions_from_db()
-        for pos in positions:
-            if "Strategy 1" in pos.get("strategy", ""):
-                return True
-        return False
+        active_pos = [pos for pos in positions if "Strategy 1" in pos.get("strategy", "")]
+        return len(active_pos) == 4
     
     async def is_directional_active(self):
         positions = await self.get_positions_from_db()
-        for pos in positions:
-            if "Strategy 2" in pos.get("strategy", ""):
-                return True
-        return False
+        return any("Strategy 2" in pos.get("strategy", "") for pos in positions)
 
 
 paper_engine = PaperTradingEngine()

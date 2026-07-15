@@ -146,6 +146,24 @@ class DeltaClient:
         }
         await self.request("POST", "/v2/orders",data=data, sign=True)
 
+    async def close_live_position(self, order: dict):
+        # Placeholder for closing live position logic
+        logger.info("Closing live position: %s %s %s", order.get('product_symbol'), order.get("side"), order.get("size"))
+        data = {
+            "product_id": order.get("id") or order.get("product_id"),
+            "product_symbol": order.get("product_symbol"),
+            "size": abs(int(order.get("size"))),
+            "side": "sell" if int(order.get("size")) > 0 else "buy",
+            "order_type": "market_order",
+            "time_in_force": "gtc",
+            "mmp": "disabled",
+            "post_only": False,
+            "reduce_only": True,
+            "client_order_id": f"deltaBot-close-{random.randint(1000,9999)}-{int(time.time())}",
+            "cancel_orders_accepted":False
+        }
+        await self.request("POST", "/v2/orders",data=data, sign=True)
+
     async def get_live_positions(self):
         # Delta API V2: GET /v2/positions/margined
         return await self.request("GET", "/v2/positions/margined", sign=True)

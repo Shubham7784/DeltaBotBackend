@@ -103,6 +103,13 @@ async def run_strategy1():
         return {"status": "success", "message": msg}
     return {"status": "error", "message": msg}
 
+@app.post("/api/strategy1/disable")
+async def disable_strategy1():
+    await paper_engine.close_position("Strategy 1")
+    risk_manager.iron_fly_enabled = False
+    iron_fly.reset()
+    return {"status": "disabled"}
+
 @app.post("/api/strategy2/enable")
 async def enable_strategy2():
     risk_manager.directional_enabled = True
@@ -114,6 +121,7 @@ async def enable_strategy2():
 
 @app.post("/api/strategy2/disable")
 async def disable_strategy2():
+    await paper_engine.close_position("Strategy 2")
     risk_manager.directional_enabled = False
     directional_strategy.reset()
     return {"status": "disabled"}
@@ -138,7 +146,8 @@ async def close_all_endpoint():
     iron_fly.reset()
     hedge_manager.reset()
     risk_manager.directional_enabled = False
-    directional_strategy.reset()
+    risk_manager.iron_fly_enabled = False
+    await directional_strategy.reset()
 
     # Broadcast empty update to instantly refresh frontends
     payload = {
@@ -180,7 +189,7 @@ async def run_scheduler_checks(now: datetime | None = None):
     current_date_str = now.strftime("%Y-%m-%d")
 
     logger.info("Scheduler check time: %s:%s", current_hour, current_minute)
-    if (7 <= current_hour < 9) and (30 <= current_minute < 45):
+    if (7 <= current_hour < 8) and (30<= current_minute < 45):
         is_active = len(await paper_engine.get_positions()) > 0 and len(iron_fly.active_legs) > 0
 
         if not is_active and last_scheduler_run_date != current_date_str:
@@ -209,11 +218,11 @@ async def run_scheduler_checks(now: datetime | None = None):
                 await log_manager.broadcast(payload)
             else:
                 logger.warning("Auto-deployment failed or skipped: %s", msg)
-    elif (17 <= current_hour < 18) and (25 <= current_minute < 30):
+    elif (17 <= current_hour < 18) and (15<= current_minute < 30):
         is_active = len(iron_fly.active_legs) > 0
         if is_active:
             logger.info("Evening auto-close trigger hit at %s. Closing positions to avoid overnight risk.", now.strftime('%Y-%m-%d %H:%M:%S'))
-            await paper_engine.close_all()
+            await paper_engine.close_position("Strategy 1")
             iron_fly.reset()
             hedge_manager.reset()
 
@@ -230,6 +239,8 @@ async def market_loop():
         logger.debug("Unable to fetch public IP")
 
     logger.info("Public IP: %s", ip)
+    await iron_fly.get_active_legs()  # Initialize active legs from DB on startup
+    await directional_strategy.get_active_position()  # Initialize active position from DB on startup
     while True:
         try:
             now = datetime.now(ZoneInfo("Asia/Kolkata"))
