@@ -189,8 +189,8 @@ async def run_scheduler_checks(now: datetime | None = None):
     current_date_str = now.strftime("%Y-%m-%d")
 
     logger.info("Scheduler check time: %s:%s", current_hour, current_minute)
-    if (7 <= current_hour < 8) and (30<= current_minute < 45):
-        is_active = len(await paper_engine.get_positions()) > 0 and len(iron_fly.active_legs) > 0
+    if (7 <= current_hour <8) and (30<= current_minute<45):
+        is_active = len(await paper_engine.get_positions()) > 0 and len(iron_fly.active_legs) == 4
 
         if not is_active and last_scheduler_run_date != current_date_str:
             logger.info("Scheduler auto-deploy trigger hit at %s. Auto-deploying Iron Fly strategy.", now.strftime('%Y-%m-%d %H:%M:%S'))
@@ -219,7 +219,7 @@ async def run_scheduler_checks(now: datetime | None = None):
             else:
                 logger.warning("Auto-deployment failed or skipped: %s", msg)
     elif (17 <= current_hour < 18) and (15<= current_minute < 30):
-        is_active = len(iron_fly.active_legs) > 0
+        is_active = len(iron_fly.active_legs) == 4
         if is_active:
             logger.info("Evening auto-close trigger hit at %s. Closing positions to avoid overnight risk.", now.strftime('%Y-%m-%d %H:%M:%S'))
             await paper_engine.close_position("Strategy 1")
@@ -239,10 +239,17 @@ async def market_loop():
         logger.debug("Unable to fetch public IP")
 
     logger.info("Public IP: %s", ip)
-    await iron_fly.get_active_legs()  # Initialize active legs from DB on startup
-    await directional_strategy.get_active_position()  # Initialize active position from DB on startup
+    
     while True:
         try:
+            await iron_fly.get_active_legs()  # Initialize active legs from DB on startup
+            await directional_strategy.get_active_position()  # Initialize active position from DB on startup
+            try:
+                balances = await delta_client.get_wallet_balances()
+                if balances:
+                    paper_engine.update_real_wallet(balances)
+            except Exception as e:
+                logger.exception("Error syncing real wallet")
             now = datetime.now(ZoneInfo("Asia/Kolkata"))
             if last_scheduler_check_time is None or (now - last_scheduler_check_time).total_seconds() >= 30:
                 last_scheduler_check_time = now
@@ -266,12 +273,7 @@ async def market_loop():
             await paper_engine.update_prices(price_map)
 
             # 4. Fetch real Wallet Balance from Delta API
-            try:
-                balances = await delta_client.get_wallet_balances()
-                if balances:
-                    paper_engine.update_real_wallet(balances)
-            except Exception as e:
-                logger.exception("Error syncing real wallet")
+            
 
             #5. Run directional strategy logic to check for any new signals and manage positions accordingly
             risk_manager.directional_enabled = await directional_strategy.generate_signal(paper_engine.btc_price)

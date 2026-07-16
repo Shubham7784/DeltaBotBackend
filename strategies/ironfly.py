@@ -10,7 +10,7 @@ class IronFlyStrategy:
         self.client = DeltaClient()
 
     async def execute(self, current_price: float, wing_width: float = 400.0):
-        if self.active_legs:
+        if len(self.active_legs)==4:
             return False, "Strategy already active"
 
         expiry = market_data.get_nearest_expiry()
