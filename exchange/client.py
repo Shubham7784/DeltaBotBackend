@@ -105,6 +105,7 @@ class DeltaClient:
         stop_limit = 0
         target_limit = 0
         contract_type = order.get("product", {}).get("contractType", "") or order.get("contract_type","")
+        data = {}
         if("perpetual" in contract_type):
             if side == "LONG":
                 stop_price = price * 0.99 # 2% stop loss
@@ -117,33 +118,41 @@ class DeltaClient:
                 stop_limit = stop_price + 200 # 3% stop loss limit
                 target_price = price * 0.96 # 4% take profit
                 target_limit = target_price + 200
+        
+            data = {
+                "product_id": order.get("id") or order.get("product_id"),
+                "product_symbol": order.get("symbol"),
+                "size": int(size),
+                "side": "buy" if side == "LONG" else "sell",
+                "order_type": "market_order",
+                "stop_price": stop_price, # Simplified stop loss logic
+                "stop_trigger_method": "last_traded_price",
+                "bracket_stop_trigger_method": "last_traded_price",
+                "bracket_stop_loss_limit_price": stop_limit, # Simplified stop loss limit logic
+                "bracket_stop_loss_price":stop_price, # Simplified stop loss logic
+                "bracket_take_profit_limit_price": target_limit, # Simplified take profit limit logic
+                "bracket_take_profit_price": target_price, # Simplified take profit logic
+                "time_in_force": "gtc",
+                "mmp": "disabled",
+                "post_only": False,
+                "reduce_only": False,
+                "client_order_id": client_order_id,
+                "cancel_orders_accepted":False
+            }
         else:
-            if side == "LONG":
-                stop_price = 0  # 5% stop loss for options
-                target_price = price*2 # 10% take profit for options
-            else:
-                stop_price = price * 2 # 100% stop loss for options
-                target_price = 0 # 10% take profit for options
-        data = {
-            "product_id": order.get("id") or order.get("product_id"),
-            "product_symbol": order.get("symbol"),
-            "size": int(size),
-            "side": "buy" if side == "LONG" else "sell",
-            "order_type": "market_order",
-            "stop_price": stop_price, # Simplified stop loss logic
-            "stop_trigger_method": "last_traded_price",
-            "bracket_stop_trigger_method": "last_traded_price",
-            "bracket_stop_loss_limit_price": stop_limit, # Simplified stop loss limit logic
-            "bracket_stop_loss_price":stop_price, # Simplified stop loss logic
-            "bracket_take_profit_limit_price": target_limit, # Simplified take profit limit logic
-            "bracket_take_profit_price": target_price, # Simplified take profit logic
-            "time_in_force": "gtc",
-            "mmp": "disabled",
-            "post_only": False,
-            "reduce_only": False,
-            "client_order_id": client_order_id,
-            "cancel_orders_accepted":False
-        }
+            data = {
+                "product_id": order.get("id") or order.get("product_id"),
+                "product_symbol": order.get("symbol"),
+                "size": int(size),
+                "side": "buy" if side == "LONG" else "sell",
+                "order_type": "market_order",
+                "time_in_force": "gtc",
+                "mmp": "disabled",
+                "post_only": False,
+                "reduce_only": False,
+                "client_order_id": client_order_id,
+                "cancel_orders_accepted":False
+            }
         await self.request("POST", "/v2/orders",data=data, sign=True)
 
     async def close_live_position(self, order: dict):
