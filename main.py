@@ -190,7 +190,7 @@ async def run_scheduler_checks(now: datetime | None = None):
 
     logger.info("Scheduler check time: %s:%s", current_hour, current_minute)
     if (7 <= current_hour <9) and (30<= current_minute<55):
-        is_active = len(await paper_engine.get_positions()) > 0 and len(iron_fly.active_legs)
+        is_active = len(await paper_engine.get_positions()) > 0 and len(iron_fly.active_legs) == 4
 
         if not is_active and last_scheduler_run_date != current_date_str:
             logger.info("Scheduler auto-deploy trigger hit at %s. Auto-deploying Iron Fly strategy.", now.strftime('%Y-%m-%d %H:%M:%S'))
