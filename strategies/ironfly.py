@@ -20,7 +20,7 @@ class IronFlyStrategy:
         options = market_data.get_options_by_expiry(expiry)
         
         # Center Strike with 200-400 point bias as requested
-        center_strike = round((current_price + 200) / 100) * 100
+        center_strike = round((current_price + 100) / 100) * 100
         call_strike = center_strike + wing_width
         put_strike = center_strike - wing_width
 

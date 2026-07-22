@@ -107,7 +107,7 @@ async def run_strategy1():
 async def disable_strategy1():
     await paper_engine.close_position("Strategy 1")
     risk_manager.iron_fly_enabled = False
-    iron_fly.reset()
+    await iron_fly.reset()
     return {"status": "disabled"}
 
 @app.post("/api/strategy2/enable")
@@ -189,7 +189,7 @@ async def run_scheduler_checks(now: datetime | None = None):
     current_date_str = now.strftime("%Y-%m-%d")
 
     logger.info("Scheduler check time: %s:%s", current_hour, current_minute)
-    if (7 <= current_hour <8) and (30<= current_minute<45):
+    if (7 <= current_hour <9) and (30<= current_minute<55):
         is_active = len(await paper_engine.get_positions()) > 0 and len(iron_fly.active_legs) == 4
 
         if not is_active and last_scheduler_run_date != current_date_str:
