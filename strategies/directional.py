@@ -1,8 +1,7 @@
 import logging
-from core.config import config
-from paper_trading.engine import paper_engine
 from risk.manager import risk_manager
 from exchange.market_data import market_data
+from strategies.broken_wing_butterfly import broken_wing_butterfly
 
 logger = logging.getLogger(__name__)
 
@@ -90,63 +89,18 @@ class DirectionalStrategy:
         return result
 
     async def run(self, btc_price: float,trend_signal:str):
-        # Check existing positions database to see if we have an active position
-        positions = await paper_engine.get_positions()
-        active_pos = None
-        if self.active_position:
-            active_pos = next((p for p in positions if p["id"] == self.active_position), None)
-            if not active_pos:
-                self.active_position = None
-
-        if risk_manager.directional_enabled:
-            if not self.active_position:
-                if self.last_signal == "BULLISH":
-                    try:
-                        pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
-                        self.active_position = pos
-                        logger.info("[Directional Strategy] Opened LONG position at %s", btc_price)
-                    except Exception as e:
-                        logger.exception("[Directional Strategy] Failed to open LONG")
-                elif self.last_signal == "BEARISH":
-                    try:
-                        pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
-                        self.active_position = pos
-                        logger.info("[Directional Strategy] Opened SHORT position at %s", btc_price)
-                    except Exception as e:
-                        logger.exception("[Directional Strategy] Failed to open SHORT")
+        if not risk_manager.directional_enabled:
+            return False
+        try:
+            success, message = await broken_wing_butterfly.execute(btc_price, trend_signal)
+            if success:
+                self.active_position = broken_wing_butterfly.active_legs
+                logger.info("[Directional Strategy] %s", message)
             else:
-                side = active_pos["side"]
-                if side == "LONG" and self.last_signal == "BEARISH":
-                    logger.info("[Directional Strategy] Signal reversed. Reversing LONG position at %s", btc_price)
-                    try:
-                        await paper_engine.close_position(self.active_position)
-                        self.active_position = None
-                        pos = await paper_engine.open_position(market_data.btc_futures[0], "SHORT", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
-                        self.active_position = pos
-                    except Exception as e:
-                        logger.exception("[Directional Strategy] Failed to reverse LONG to SHORT")
-                elif side == "SHORT" and self.last_signal == "BULLISH":
-                    logger.info("[Directional Strategy] Signal reversed. Reversing SHORT position at %s", btc_price)
-                    try:
-                        await paper_engine.close_position(self.active_position)
-                        self.active_position = None
-                        pos = await paper_engine.open_position(market_data.btc_futures[0], "LONG", size=config.LOT_SIZE, price=btc_price, leverage=config.FUTURE_LEVERAGE,strategy ="Strategy 2")
-                        self.active_position = pos
-                    except Exception as e:
-                        logger.exception("[Directional Strategy] Failed to reverse SHORT to LONG")
-        else:
-            if self.active_position and active_pos:
-                logger.info("[Directional Strategy] Strategy disabled. Closing active strategy position at %s", btc_price)
-                try:
-                    await paper_engine.close_position(self.active_position)
-                except Exception as e:
-                    logger.exception("[Directional Strategy] Error closing position on disable")
-                self.active_position = None
-        if self.active_position:
-            logger.debug("[Directional Strategy] Active position ID: %s, Current Signal: %s", self.active_position, self.last_signal)
-            return True
-        else:
-            logger.debug("[Directional Strategy] No active position, Current Signal: %s", self.last_signal)
+                logger.info("[Directional Strategy] %s", message)
+            return success
+        except Exception:
+            logger.exception("[Directional Strategy] Failed to open Broken Wing Butterfly")
             return False
 
     def reset(self):
@@ -177,7 +131,7 @@ class DirectionalStrategy:
         return ema
     
     async def get_active_position(self):
-        pos = await paper_engine.get_positions_from_db()
-        self.active_position = next((p for p in pos if p["strategy"] == "Strategy 2"), None)
+        await broken_wing_butterfly.get_active_legs()
+        self.active_position = broken_wing_butterfly.active_legs or None
 
 directional_strategy = DirectionalStrategy()

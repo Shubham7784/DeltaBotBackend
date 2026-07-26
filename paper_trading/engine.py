@@ -402,14 +402,14 @@ class PaperTradingEngine:
         
         
 
-    async def is_ironfly_active(self):
+    async def is_broken_wing_butterfly_active(self):
         positions = await self.get_positions_from_db()
-        active_pos = [pos for pos in positions if "Strategy 1" in pos.get("strategy", "")]
+        active_pos = [pos for pos in positions if pos.get("strategy") == "Broken Wing Butterfly"]
         return len(active_pos) == 4
     
     async def is_directional_active(self):
         positions = await self.get_positions_from_db()
-        return any("Strategy 2" in pos.get("strategy", "") for pos in positions)
+        return any(pos.get("strategy") == "Broken Wing Butterfly" for pos in positions)
 
 
 paper_engine = PaperTradingEngine()

@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import random
-from datetime import datetime
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,10 +16,9 @@ from risk.manager import risk_manager
 from risk.hedge_manager import hedge_manager
 from exchange.client import DeltaClient
 from exchange.market_data import market_data
-from strategies.ironfly import iron_fly
+from strategies.broken_wing_butterfly import broken_wing_butterfly
 from strategies.directional import directional_strategy
 from strategies.poor_mans_covered import poor_mans_covered_strategy
-from zoneinfo import ZoneInfo
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -36,10 +34,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global state to prevent duplicate triggering of scheduler in the same 7-9 AM hour window per calendar day
-last_scheduler_run_date = None
-last_scheduler_check_time = None
-
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "backend": "python/fastapi"}
@@ -54,8 +48,8 @@ async def get_positions():
 
 @app.get("/api/is-bot-running")
 async def is_bot_running():
-    active = await paper_engine.is_ironfly_active()
-    logger.debug("Checking if bot is running: Iron Fly Active: %s", active)
+    active = await paper_engine.is_broken_wing_butterfly_active()
+    logger.debug("Checking if bot is running: Broken Wing Butterfly Active: %s", active)
     return active
 
 @app.get("/api/is-directional-enabled")
@@ -83,32 +77,9 @@ async def get_trade_history():
 
 @app.get("/api/scheduler")
 async def get_scheduler_status():
-    global last_scheduler_run_date
-    now = datetime.now()
-    current_hour = now.hour
-    in_window = 7 <= current_hour < 9
     return {
-        "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "current_hour": current_hour,
-        "is_inside_window": in_window,
-        "active_window": "07:00 AM - 09:00 AM",
-        "last_run_date": last_scheduler_run_date,
-        "status": "Active & checking"
+        "status": "Disabled: Broken Wing Butterfly entries are directional-signal driven"
     }
-
-@app.post("/api/strategy1/run")
-async def run_strategy1():
-    success, msg = await iron_fly.execute(paper_engine.btc_price)
-    if success:
-        return {"status": "success", "message": msg}
-    return {"status": "error", "message": msg}
-
-@app.post("/api/strategy1/disable")
-async def disable_strategy1():
-    await paper_engine.close_position("Strategy 1")
-    risk_manager.iron_fly_enabled = False
-    await iron_fly.reset()
-    return {"status": "disabled"}
 
 @app.post("/api/strategy2/enable")
 async def enable_strategy2():
@@ -121,8 +92,9 @@ async def enable_strategy2():
 
 @app.post("/api/strategy2/disable")
 async def disable_strategy2():
-    await paper_engine.close_position("Strategy 2")
+    await paper_engine.close_position("Broken Wing Butterfly")
     risk_manager.directional_enabled = False
+    await broken_wing_butterfly.reset()
     directional_strategy.reset()
     return {"status": "disabled"}
 
@@ -143,10 +115,9 @@ async def run_poor_mans_covered_put():
 @app.post("/api/positions/close-all")
 async def close_all_endpoint():
     await paper_engine.close_all()
-    iron_fly.reset()
+    await broken_wing_butterfly.reset()
     hedge_manager.reset()
     risk_manager.directional_enabled = False
-    risk_manager.iron_fly_enabled = False
     await directional_strategy.reset()
 
     # Broadcast empty update to instantly refresh frontends
@@ -178,57 +149,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         log_manager.disconnect(websocket)
 
-async def run_scheduler_checks(now: datetime | None = None):
-    global last_scheduler_run_date
-
-    if now is None:
-        now = datetime.now(ZoneInfo("Asia/Kolkata"))
-
-    current_hour = now.hour
-    current_minute = now.minute
-    current_date_str = now.strftime("%Y-%m-%d")
-
-    logger.info("Scheduler check time: %s:%s", current_hour, current_minute)
-    if (7 <= current_hour <9) and (30<= current_minute<55):
-        is_active = len(await paper_engine.get_positions()) > 0 and len(iron_fly.active_legs) == 4
-
-        if not is_active and last_scheduler_run_date != current_date_str:
-            logger.info("Scheduler auto-deploy trigger hit at %s. Auto-deploying Iron Fly strategy.", now.strftime('%Y-%m-%d %H:%M:%S'))
-
-            success, msg = await iron_fly.execute(paper_engine.btc_price)
-            if success:
-                logger.info("Auto-deployment successful: %s", msg)
-                last_scheduler_run_date = current_date_str
-
-                wallet = await paper_engine.get_wallet()
-                positions = await paper_engine.get_positions()
-                greeks = await risk_manager.get_greeks()
-                payload = {
-                    "type": "MARKET_UPDATE",
-                    "data": {"symbol": "BTC", "price": paper_engine.btc_price},
-                    "wallet": wallet,
-                    "positions": positions,
-                    "risk": {
-                        "netDelta": greeks.get("delta", 0.0),
-                        "netGamma": greeks.get("gamma", 0.0),
-                        "netTheta": greeks.get("theta", 0.0),
-                        "directionalEnabled": False
-                    }
-                }
-                await log_manager.broadcast(payload)
-            else:
-                logger.warning("Auto-deployment failed or skipped: %s", msg)
-    elif (17 <= current_hour < 18) and (15<= current_minute < 30):
-        is_active = len(iron_fly.active_legs) == 4
-        if is_active:
-            logger.info("Evening auto-close trigger hit at %s. Closing positions to avoid overnight risk.", now.strftime('%Y-%m-%d %H:%M:%S'))
-            await paper_engine.close_position("Strategy 1")
-            iron_fly.reset()
-            hedge_manager.reset()
-
 async def market_loop():
-    global last_scheduler_check_time
-
     # Use async httpx to avoid blocking the event loop when fetching public IP
     ip = "unknown"
     try:
@@ -242,7 +163,7 @@ async def market_loop():
     
     while True:
         try:
-            await iron_fly.get_active_legs()  # Initialize active legs from DB on startup
+            await broken_wing_butterfly.get_active_legs()  # Initialize active legs from DB on startup
             await directional_strategy.get_active_position()  # Initialize active position from DB on startup
             try:
                 balances = await delta_client.get_wallet_balances()
@@ -250,11 +171,6 @@ async def market_loop():
                     paper_engine.update_real_wallet(balances)
             except Exception as e:
                 logger.exception("Error syncing real wallet")
-            now = datetime.now(ZoneInfo("Asia/Kolkata"))
-            if last_scheduler_check_time is None or (now - last_scheduler_check_time).total_seconds() >= 30:
-                last_scheduler_check_time = now
-                await run_scheduler_checks(now)
-
             # 1. Fetch all tickers from Delta to get prices for all symbols
             tickers = await market_data.get_all_tickers()
             price_map = {}
