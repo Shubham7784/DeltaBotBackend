@@ -49,8 +49,17 @@ class MarketDataService:
             return []
 
     def get_nearest_expiry(self):
-        expiries = sorted(list(set([datetime.strptime(o.get("symbol").split("-")[-1],"%d%m%y") for o in self.btc_options if o.get("symbol")])))
+        expiries = self.get_option_expiries()
         return expiries[0] if expiries else None
+
+    def get_option_expiries(self):
+        expiries = []
+        for option in self.btc_options:
+            try:
+                expiries.append(datetime.strptime(option.get("symbol").split("-")[-1], "%d%m%y"))
+            except (AttributeError, ValueError):
+                continue
+        return sorted(set(expiries))
 
     def get_options_by_expiry(self, expiry: str):
         return [o for o in self.btc_options if o.get("symbol").endswith(datetime.strftime(expiry,"%d%m%y"))]
@@ -90,8 +99,9 @@ class MarketDataService:
         params = {
             'symbol': symbol,
             'resolution': resolution,
-            'start': int((datetime.now() - timedelta(hours=20)).timestamp()), # Last 40 candles for 30m resolution
-            'end': int((datetime.now() - timedelta(minutes=30)).timestamp())
+            # EMA200 needs materially more than the former 20 hour sample.
+            'start': int((datetime.now() - timedelta(hours=260 if resolution == "1h" else 120)).timestamp()),
+            'end': int(datetime.now().timestamp())
         }
         ohcl = await self.client.request("GET", "/v2/history/candles", params=params)
         self.ohlc_candles_cache[resolution] = ohcl.get("result", [])

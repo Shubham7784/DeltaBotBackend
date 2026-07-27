@@ -29,6 +29,9 @@ class PaperTradingEngine:
                 return psycopg2.connect(self.db_url)
             except Exception:
                 logger.warning("Could not connect to Postgres at DATABASE_URL, falling back to local sqlite database")
+                # All query paths must use sqlite placeholders/cursors after a
+                # fallback; retaining the URL made the fallback unusable.
+                self.db_url = ""
         return sqlite3.connect("paper_trading.db")
 
     def _init_db(self):
@@ -107,6 +110,13 @@ class PaperTradingEngine:
             ''')
         
         conn.commit()
+        # Existing sqlite installations predate currentPrice.  Keep migrations
+        # local and idempotent instead of requiring a new database.
+        if not self.db_url:
+            columns = [row[1].lower() for row in cursor.execute('PRAGMA table_info(positions)').fetchall()]
+            if 'currentprice' not in columns:
+                cursor.execute('ALTER TABLE positions ADD COLUMN currentPrice REAL')
+                conn.commit()
         conn.close()
 
     def update_real_wallet(self, data: dict):
@@ -203,7 +213,11 @@ class PaperTradingEngine:
         return positions
     def get_trade_history(self):
         conn = self.get_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if self.db_url else conn.cursor()
+        if self.db_url:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        else:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
         cursor.execute('SELECT * FROM trade_history ORDER BY timestamp DESC')
         rows = cursor.fetchall()
         history = [dict(row) for row in rows]
@@ -231,7 +245,8 @@ class PaperTradingEngine:
                 diff = current_price - pos["entryPrice"]
                 multiplier = 1 if pos["side"] == "LONG" else -1
                 new_pnl = diff * pos["size"] * multiplier
-                cursor.execute('UPDATE positions SET unrealized_pnl = %s, currentprice = %s WHERE id = %s', (new_pnl, current_price, pos["id"]))
+                token = '%s' if self.db_url else '?'
+                cursor.execute(f'UPDATE positions SET unrealized_pnl = {token}, currentprice = {token} WHERE id = {token}', (new_pnl, current_price, pos["id"]))
         
         conn.commit()
         conn.close()
@@ -239,7 +254,7 @@ class PaperTradingEngine:
     async def update_positions_with_live_price(self):
         # This can be called after fetching live price to update PnL
         conn = self.get_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) if self.db_url else conn.cursor()
         
         positions = await self.get_positions()
         for pos in positions:
@@ -281,11 +296,12 @@ class PaperTradingEngine:
                 size = size * self.size_map["ETHUSD"] # Convert to contract size for ETH
             await self.client.open_live_position(order, side, size, price, leverage) # Placeholder for live trading logic
         
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) if self.db_url else conn.cursor()
+        token = '%s' if self.db_url else '?'
         cursor.execute('''
             INSERT INTO positions (id, symbol, side, entryPrice, currentPrice, size, leverage, margin, unrealized_pnl, timestamp,strategy)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
-            ''', (pos_id, order.get("symbol"), side, price, price, size, leverage, margin_req, 0.0, time.time(),strategy))
+            VALUES ({0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},{0})
+            '''.format(token), (pos_id, order.get("symbol"), side, price, price, size, leverage, margin_req, 0.0, time.time(),strategy))
         conn.commit()    
         conn.close()
         
@@ -313,7 +329,11 @@ class PaperTradingEngine:
             else:
                 logger.warning("Error closing live positions: %s", response.get("success"))
         conn = self.get_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        if self.db_url:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        else:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
         # 1. Archive current positions to trade_history
         positions = await self.get_positions()
         for pos in positions:
@@ -321,10 +341,11 @@ class PaperTradingEngine:
             # For complex multi-symbol we'd need the price map, but for now we'll use btc_price or entryPrice as fallback
             # In a real engine we'd pass the prices here.
             # For now let's just use the unrealized_pnl they have.
+            token = '%s' if self.db_url else '?'
             cursor.execute('''
                 INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp, strategy)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (
+                VALUES ({0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0})
+            '''.format(token), (
                 pos["id"], 
                 pos["symbol"], 
                 pos["side"], 
@@ -352,15 +373,29 @@ class PaperTradingEngine:
         conn.commit()
         conn.close()    
 
-    async def close_position(self, strategy_name: str):
+    async def get_adaptive_active_strategies(self):
+        names = {
+            'Iron Condor', 'Bullish Broken Wing Butterfly', 'Bearish Broken Wing Butterfly',
+            'Bull Call Debit Spread', 'Bear Put Debit Spread', 'Long Straddle', 'Long Strangle',
+        }
+        return sorted({position.get('strategy') for position in await self.get_positions_from_db() if position.get('strategy') in names})
+
+    async def close_position(self, strategy_name: str, suppress_missing: bool = False):
         conn = self.get_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cursor.execute('SELECT * FROM positions WHERE strategy = %s', (strategy_name,))
-        db_pos = cursor.fetchall()
+        if self.db_url:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        else:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+        token = '%s' if self.db_url else '?'
+        cursor.execute(f'SELECT * FROM positions WHERE strategy = {token}', (strategy_name,))
+        db_pos = [dict(row) for row in cursor.fetchall()]
         if not db_pos:
             conn.close()
+            if suppress_missing:
+                return False
             raise Exception("Position not found")
-        live_pos = await self.client.get_live_positions()
+        live_pos = await self.client.get_live_positions() if not config.IS_PAPER_TRADING else {}
         if live_pos and "result" in live_pos:
             for p in live_pos["result"]:
                 for db in db_pos:
@@ -373,8 +408,8 @@ class PaperTradingEngine:
         for db in db_pos:
             cursor.execute('''
                 INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp, strategy)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (
+                VALUES ({0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0})
+            '''.format(token), (
                 db["id"], 
                 db["symbol"], 
                 db["side"], 
@@ -396,9 +431,10 @@ class PaperTradingEngine:
                 strategy=db.get("strategy", "N/A")
             )
             logger.info("Position closed: %s %s PnL: %.2f", db["symbol"], db["side"], db["unrealized_pnl"])
-        cursor.execute('DELETE FROM positions WHERE strategy = %s', (strategy_name,))
+        cursor.execute(f'DELETE FROM positions WHERE strategy = {token}', (strategy_name,))
         conn.commit()
         conn.close()
+        return True
         
         
 

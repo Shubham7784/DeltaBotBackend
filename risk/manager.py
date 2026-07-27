@@ -1,10 +1,11 @@
 from paper_trading.engine import paper_engine
 from core.config import config
+import time
 
 class RiskManager:
     def __init__(self):
-        self.max_daily_drawdown = 0.02 # 2%
-        self.max_margin_usage = 0.8 # 80%
+        self.max_daily_drawdown = config.MAX_DAILY_LOSS_PCT
+        self.max_margin_usage = config.MAX_MARGIN_USAGE_PCT
         self.client = paper_engine.client
         self.directional_enabled = False
 
@@ -16,6 +17,32 @@ class RiskManager:
             return False, "Max margin threshold exceeded"
         
         return True, "Safe"
+
+    async def validate_new_strategy(self, strategy_name: str):
+        """Portfolio-level gate called immediately before every adaptive entry."""
+        wallet = await paper_engine.get_wallet()
+        balance = max(float(wallet['balance']), 0.0)
+        if balance <= 0:
+            return False, 'Wallet balance is unavailable or non-positive'
+        history = paper_engine.get_trade_history()
+        day_start = time.time() - (time.time() % 86400)
+        daily_loss = -sum(min(0.0, float(t.get('pnl') or 0)) for t in history if float(t.get('timestamp') or 0) >= day_start)
+        if daily_loss >= balance * self.max_daily_drawdown:
+            return False, 'Maximum daily loss limit reached'
+        active = await paper_engine.get_adaptive_active_strategies()
+        if len(active) >= config.MAX_CONCURRENT_OPTIONS_POSITIONS:
+            return False, 'Maximum concurrent options positions reached'
+        margin_usage = float(wallet['usedMargin']) / balance
+        if margin_usage >= self.max_margin_usage:
+            return False, 'Maximum margin utilisation reached'
+        if float(wallet['usedMargin']) >= balance * config.MAX_PORTFOLIO_EXPOSURE_PCT:
+            return False, 'Maximum portfolio exposure reached'
+        return True, 'Risk validation passed'
+
+    async def volatility_adjusted_size(self, analysis):
+        """Scale the configured lot down as ATR rises; never increase it."""
+        atr_penalty = max(1.0, float(analysis.atr_pct) / 1.0)
+        return max(0.1, min(1.0, config.ADAPTIVE_RISK_PER_TRADE_PCT / .005 / atr_penalty))
 
     async def get_greeks(self):
         # Move logic from paper engine to here if needed, or query engine

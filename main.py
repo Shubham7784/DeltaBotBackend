@@ -19,6 +19,7 @@ from exchange.market_data import market_data
 from strategies.broken_wing_butterfly import broken_wing_butterfly
 from strategies.directional import directional_strategy
 from strategies.poor_mans_covered import poor_mans_covered_strategy
+from strategies.selection_engine import strategy_selector
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -80,6 +81,34 @@ async def get_scheduler_status():
     return {
         "status": "Disabled: Broken Wing Butterfly entries are directional-signal driven"
     }
+
+@app.get("/api/adaptive-strategy/status")
+async def adaptive_strategy_status():
+    """Dashboard contract for the adaptive selection/position monitor."""
+    return strategy_selector.status(await paper_engine.get_positions())
+
+@app.post("/api/adaptive-strategy/enable")
+async def enable_adaptive_strategy():
+    strategy_selector.enabled = True
+    return {"status": "enabled"}
+
+@app.post("/api/adaptive-strategy/disable")
+async def disable_adaptive_strategy(close_active: bool = False):
+    strategy_selector.enabled = False
+    if close_active:
+        for name in await paper_engine.get_adaptive_active_strategies():
+            await paper_engine.close_position(name, suppress_missing=True)
+    return {"status": "disabled", "positionsClosed": close_active}
+
+@app.post("/api/adaptive-strategy/{strategy_name}/enabled")
+async def set_adaptive_strategy_enabled(strategy_name: str, enabled: bool):
+    if strategy_name not in strategy_selector.strategies:
+        return {"status": "error", "message": "Unknown strategy"}
+    if enabled:
+        strategy_selector.enabled_strategies.add(strategy_name)
+    else:
+        strategy_selector.enabled_strategies.discard(strategy_name)
+    return {"status": "success", "enabled": enabled}
 
 @app.post("/api/strategy2/enable")
 async def enable_strategy2():
@@ -191,8 +220,10 @@ async def market_loop():
             # 4. Fetch real Wallet Balance from Delta API
             
 
-            #5. Run directional strategy logic to check for any new signals and manage positions accordingly
-            risk_manager.directional_enabled = await directional_strategy.generate_signal(paper_engine.btc_price)
+            # The adaptive selector is the sole automatic options entry point.
+            # Keep the legacy directional strategy available through its API,
+            # but do not allow it to compete with an adaptive active position.
+            await strategy_selector.run_cycle(paper_engine.btc_price, tickers)
 
             # Execute automated Poor Man's Covered based on directional trend
             # if directional_strategy.last_signal == "BULLISH":
@@ -216,6 +247,7 @@ async def market_loop():
             
             positions = await paper_engine.get_positions()
             # 6. Broadcast updates
+            adaptive_status = strategy_selector.status(positions)
             payload = {
                 "type": "MARKET_UPDATE",
                 "data": {"symbol": "BTC", "price": paper_engine.btc_price},
@@ -228,6 +260,15 @@ async def market_loop():
                 },
                 "isPaperTrading":config.IS_PAPER_TRADING,
                 "marketTrend":directional_strategy.last_signal,
+                # Top-level values preserve compatibility with the frontend's
+                # existing MARKET_UPDATE consumer; the complete decision is
+                # also available under adaptiveStrategy.
+                "marketRegime": adaptive_status["marketRegime"],
+                "marketRegimeConfidence": adaptive_status["marketRegimeConfidence"],
+                "marketRegimeReasons": adaptive_status["marketRegimeReasons"],
+                "adaptivePosition": adaptive_status["activePosition"],
+                "currentAdaptivePosition": adaptive_status["activePosition"],
+                "adaptiveStrategy": adaptive_status,
                 "logs":log_manager.get_recent_messages(message_type="LOG")
             }
             await log_manager.broadcast(payload)
