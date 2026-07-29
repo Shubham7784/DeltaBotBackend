@@ -34,7 +34,7 @@ class StrategySelectionEngine:
         return {name: round(score * analysis.confidence, 3) for name, score in values.items() if name in self.enabled_strategies}
 
     async def run_cycle(self, price, tickers):
-        candles = await market_data.get_historical_ohlc_candles('BTCUSD', '1h')
+        candles = await market_data.get_historical_ohlc_candles('BTCUSD', '4h')
         analysis = market_analyzer.analyze(price, candles, tickers, market_data.btc_options)
         await self.monitor_positions()
         active = await paper_engine.get_adaptive_active_strategies()

@@ -96,15 +96,21 @@ class MarketDataService:
                 return self.ohlc_candles
 
         # Delta API V2: GET /v2/candles
+        # EMA-200 on four-hour candles needs at least 800 hours of history.
+        # Keep a small buffer so the indicator remains stable at the boundary.
+        lookback_hours = {"1h": 260, "4h": 900}.get(resolution, 120)
         params = {
             'symbol': symbol,
             'resolution': resolution,
-            # EMA200 needs materially more than the former 20 hour sample.
-            'start': int((datetime.now() - timedelta(hours=260 if resolution == "1h" else 120)).timestamp()),
+            'start': int((datetime.now() - timedelta(hours=lookback_hours)).timestamp()),
             'end': int(datetime.now().timestamp())
         }
         ohcl = await self.client.request("GET", "/v2/history/candles", params=params)
-        self.ohlc_candles_cache[resolution] = ohcl.get("result", [])
+        # Delta's REST endpoint returns newest-first candles.  Every consumer
+        # expects chronological order for EMA, RSI, ATR and structure checks.
+        self.ohlc_candles_cache[resolution] = sorted(
+            ohcl.get("result", []), key=lambda candle: float(candle.get("time", 0))
+        )
         self.last_ohlc_fetch[resolution] = datetime.now()
         self.ohlc_candles = self.ohlc_candles_cache[resolution]
         return self.ohlc_candles

@@ -9,6 +9,7 @@ from typing import List, Dict, Optional
 from core.config import config
 from exchange.client import DeltaClient
 from core.telegram_bot import telegram_bot
+from core.expiry import is_expiry_close_due, option_expiry_from_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -379,6 +380,29 @@ class PaperTradingEngine:
             'Bull Call Debit Spread', 'Bear Put Debit Spread', 'Long Straddle', 'Long Strangle',
         }
         return sorted({position.get('strategy') for position in await self.get_positions_from_db() if position.get('strategy') in names})
+
+    async def close_positions_at_expiry_cutoff(self):
+        """Close option positions at 5:20 PM IST on their expiry date.
+
+        Positions are closed by strategy so every leg of a multi-leg option
+        structure is exited together.  Non-option instruments are ignored.
+        """
+        strategy_names = set()
+        for position in await self.get_positions_from_db():
+            expiry = option_expiry_from_symbol(position.get("symbol"))
+            strategy = position.get("strategy")
+            if expiry and strategy and is_expiry_close_due(expiry):
+                strategy_names.add(strategy)
+
+        closed = []
+        for strategy_name in sorted(strategy_names):
+            if await self.close_position(strategy_name, suppress_missing=True):
+                closed.append(strategy_name)
+                logger.info(
+                    "Closed %s at the 5:20 PM IST expiry cutoff",
+                    strategy_name,
+                )
+        return closed
 
     async def close_position(self, strategy_name: str, suppress_missing: bool = False):
         conn = self.get_connection()

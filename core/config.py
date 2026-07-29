@@ -16,12 +16,13 @@ class Config:
 
     FUTURE_LEVERAGE = int(os.getenv("FUTURE_LEVERAGE", 100))
     OPTION_LEVERAGE = int(os.getenv("OPTION_LEVERAGE", 100))
-    LOT_SIZE = float(os.getenv("LOT_SIZE", 0.1))
+    LOT_SIZE = float(os.getenv("LOT_SIZE", 0.05))
 
     POOR_MANS_LOT_SIZE = float(os.getenv("POOR_MANS_LOT_SIZE", 0.05))
 
-    # Adaptive options engine. Defaults are intentionally conservative.
-    ADAPTIVE_TRADING_ENABLED = os.getenv("ADAPTIVE_TRADING_ENABLED", "false").lower() == "true"
+    # The adaptive selector runs automatically whenever the backend is up.
+    # The disable endpoint remains available as an explicit emergency stop.
+    ADAPTIVE_TRADING_ENABLED = True
     MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.02"))
     MAX_STRATEGY_LOSS_PCT = float(os.getenv("MAX_STRATEGY_LOSS_PCT", "0.01"))
     MAX_PORTFOLIO_EXPOSURE_PCT = float(os.getenv("MAX_PORTFOLIO_EXPOSURE_PCT", "0.50"))
@@ -32,6 +33,14 @@ class Config:
     BUTTERFLY_EXPIRY_DAYS = int(os.getenv("BUTTERFLY_EXPIRY_DAYS", "1"))
     LONG_VOL_MIN_EXPIRY_DAYS = int(os.getenv("LONG_VOL_MIN_EXPIRY_DAYS", "1"))
     LONG_VOL_MAX_EXPIRY_DAYS = int(os.getenv("LONG_VOL_MAX_EXPIRY_DAYS", "3"))
+    HIGH_VOL_ATR_PCT = float(os.getenv("HIGH_VOL_ATR_PCT", "1.5"))
+    HIGH_VOL_IV_PCT = float(os.getenv("HIGH_VOL_IV_PCT", "75"))
+    # BTC funding around +/-0.1% is normal and should not affect the regime.
+    # Only unusually extreme funding can contribute, and it still requires an
+    # ATR or IV confirmation in the analyzer.
+    HIGH_FUNDING_RATE_PCT = float(os.getenv("HIGH_FUNDING_RATE_PCT", "0.25"))
+    FUNDING_CONFIRM_ATR_PCT = float(os.getenv("FUNDING_CONFIRM_ATR_PCT", "0.8"))
+    FUNDING_CONFIRM_IV_PCT = float(os.getenv("FUNDING_CONFIRM_IV_PCT", "60"))
     
     # Telegram bot configuration
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")

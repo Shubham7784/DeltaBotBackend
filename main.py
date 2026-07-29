@@ -79,7 +79,7 @@ async def get_trade_history():
 @app.get("/api/scheduler")
 async def get_scheduler_status():
     return {
-        "status": "Disabled: Broken Wing Butterfly entries are directional-signal driven"
+        "status": "Active: adaptive strategy runs automatically; expiring options close at 5:20 PM IST"
     }
 
 @app.get("/api/adaptive-strategy/status")
@@ -216,6 +216,10 @@ async def market_loop():
             
             # 3. Update all positions in paper engine
             await paper_engine.update_prices(price_map)
+
+            # Expiring option structures must be flat by 5:20 PM IST.  Do
+            # this before considering a new adaptive entry in this cycle.
+            await paper_engine.close_positions_at_expiry_cutoff()
 
             # 4. Fetch real Wallet Balance from Delta API
             
