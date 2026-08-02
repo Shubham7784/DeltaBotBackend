@@ -7,16 +7,20 @@ class Config:
     ENV = os.getenv("NODE_ENV", "development")
     PORT = int(os.getenv("PORT", 3000))
     IS_PAPER_TRADING = os.getenv("IS_PAPER_TRADING", "true").lower() == "true"
+    ALLOW_REAL_ORDER_EXECUTION = os.getenv("ALLOW_REAL_ORDER_EXECUTION", "false").lower() == "true"
     
     DELTA_API_KEY = os.getenv("DELTA_EXCHANGE_API_KEY", "")
     DELTA_API_SECRET = os.getenv("DELTA_EXCHANGE_API_SECRET", "")
     
-    BASE_URL = "https://cdn-ind.testnet.deltaex.org"
+    BASE_URL = os.getenv("DELTA_BASE_URL", os.getenv("DELTA_API_BASE_URL", "https://api.india.delta.exchange"))
     DATABASE_URL = os.getenv("DATABASE_URL", "")
 
     FUTURE_LEVERAGE = int(os.getenv("FUTURE_LEVERAGE", 100))
+    FUTURES_SYMBOL = os.getenv("FUTURES_SYMBOL", "BTCUSD")
+    POSITION_CACHE_TTL_SECONDS = int(os.getenv("POSITION_CACHE_TTL_SECONDS", "3600"))
     OPTION_LEVERAGE = int(os.getenv("OPTION_LEVERAGE", 100))
     LOT_SIZE = float(os.getenv("LOT_SIZE", 0.05))
+    PAPER_WALLET_BALANCE = float(os.getenv("PAPER_WALLET_BALANCE", "1000000"))
 
     POOR_MANS_LOT_SIZE = float(os.getenv("POOR_MANS_LOT_SIZE", 0.05))
 

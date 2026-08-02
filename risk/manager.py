@@ -51,7 +51,7 @@ class RiskManager:
         total_theta = 0.0
         positions = await paper_engine.get_positions()
         for pos in positions:
-            if("perpetual" in pos.get("contractType")):
+            if(pos.get("contractType") and "perpetual" in pos.get("contractType", [])):
                 continue # Skip futures for greeks calculation
             ticker = await self.client.get_ticker(pos["symbol"])
             greeks = ticker.get("result", {}).get("greeks", {})

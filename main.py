@@ -194,12 +194,7 @@ async def market_loop():
         try:
             await broken_wing_butterfly.get_active_legs()  # Initialize active legs from DB on startup
             await directional_strategy.get_active_position()  # Initialize active position from DB on startup
-            try:
-                balances = await delta_client.get_wallet_balances()
-                if balances:
-                    paper_engine.update_real_wallet(balances)
-            except Exception as e:
-                logger.exception("Error syncing real wallet")
+            # Paper trading uses the configured wallet balance; live wallet fetches are disabled for now.
             # 1. Fetch all tickers from Delta to get prices for all symbols
             tickers = await market_data.get_all_tickers()
             price_map = {}

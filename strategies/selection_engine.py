@@ -8,6 +8,15 @@ from paper_trading.engine import paper_engine
 from risk.manager import risk_manager
 from strategies.adaptive_options import IronCondor, BrokenWingButterfly, DebitSpread, LongStraddle, LongStrangle
 
+
+class FuturesMomentumStrategy:
+    profit_target = 0.02
+    stop_loss = 0.01
+    max_hold_hours = 4
+
+    async def execute(self, price, size):
+        return False, 'Not implemented'
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,6 +27,7 @@ class StrategySelectionEngine:
             'Iron Condor': IronCondor(), 'Bullish Broken Wing Butterfly': BrokenWingButterfly(True),
             'Bearish Broken Wing Butterfly': BrokenWingButterfly(False), 'Bull Call Debit Spread': DebitSpread(True),
             'Bear Put Debit Spread': DebitSpread(False), 'Long Straddle': LongStraddle(), 'Long Strangle': LongStrangle(),
+            'Futures Momentum': FuturesMomentumStrategy(),
         }
         self.enabled_strategies = set(self.strategies)
         self.last_decision = {'status': 'idle', 'selectedStrategy': None, 'confidence': 0.0, 'reason': ''}
@@ -27,8 +37,8 @@ class StrategySelectionEngine:
         regime_map = {
             'SIDEWAYS': {'Iron Condor': .90}, 'MILD_BULLISH': {'Bullish Broken Wing Butterfly': .85, 'Bull Call Debit Spread': .65},
             'MILD_BEARISH': {'Bearish Broken Wing Butterfly': .85, 'Bear Put Debit Spread': .65},
-            'STRONG_BULLISH': {'Bull Call Debit Spread': .92}, 'STRONG_BEARISH': {'Bear Put Debit Spread': .92},
-            'HIGH_VOLATILITY_EVENT': {'Long Straddle': .82, 'Long Strangle': .76},
+            'STRONG_BULLISH': {'Futures Momentum': .98, 'Bull Call Debit Spread': .92}, 'STRONG_BEARISH': {'Futures Momentum': .98, 'Bear Put Debit Spread': .92},
+            'HIGH_VOLATILITY_EVENT': {'Futures Momentum': .88, 'Long Straddle': .82, 'Long Strangle': .76},
         }
         values = regime_map.get(analysis.regime, {})
         return {name: round(score * analysis.confidence, 3) for name, score in values.items() if name in self.enabled_strategies}
@@ -37,10 +47,14 @@ class StrategySelectionEngine:
         candles = await market_data.get_historical_ohlc_candles('BTCUSD', '4h')
         analysis = market_analyzer.analyze(price, candles, tickers, market_data.btc_options)
         await self.monitor_positions()
+        strong_move = analysis.regime in {'STRONG_BULLISH', 'STRONG_BEARISH', 'HIGH_VOLATILITY_EVENT'}
         active = await paper_engine.get_adaptive_active_strategies()
-        if active:
+        if active and not strong_move:
             self.last_decision = {'status': 'monitoring', 'selectedStrategy': active[0], 'confidence': analysis.confidence, 'reason': 'An options strategy is already active', 'analysis': analysis.to_dict()}
             return self.last_decision
+        if strong_move and active:
+            for name in active:
+                await paper_engine.close_position(name, suppress_missing=True)
         if not self.enabled:
             self.last_decision = {'status': 'disabled', 'selectedStrategy': None, 'confidence': analysis.confidence, 'reason': 'Adaptive trading is disabled', 'analysis': analysis.to_dict()}
             return self.last_decision
@@ -53,10 +67,30 @@ class StrategySelectionEngine:
         if not safe:
             self.last_decision = {'status': 'risk_rejected', 'selectedStrategy': name, 'confidence': scores[name], 'reason': reason, 'analysis': analysis.to_dict(), 'scores': scores}
             return self.last_decision
-        success, reason = await self.strategies[name].execute(price, await risk_manager.volatility_adjusted_size(analysis))
+        if name == 'Futures Momentum':
+            size = await risk_manager.volatility_adjusted_size(analysis)
+            side = 'LONG' if analysis.regime == 'STRONG_BULLISH' else 'SHORT'
+            success, reason = await self._execute_futures_signal(price, size, side)
+        else:
+            success, reason = await self.strategies[name].execute(price, await risk_manager.volatility_adjusted_size(analysis))
         if success: self.opened_at[name] = time.time()
         self.last_decision = {'status': 'executed' if success else 'entry_rejected', 'selectedStrategy': name, 'confidence': scores[name], 'reason': reason, 'analysis': analysis.to_dict(), 'scores': scores}
         return self.last_decision
+
+    async def _execute_futures_signal(self, price, size, side):
+        try:
+            await paper_engine.open_position(
+                {"symbol": config.FUTURES_SYMBOL, "id": config.FUTURES_SYMBOL, "product": {"contractType": "perpetual"}},
+                side,
+                size,
+                price,
+                config.FUTURE_LEVERAGE,
+                'Futures Momentum',
+            )
+            return True, f'Opened {side} {config.FUTURES_SYMBOL} futures'
+        except Exception as exc:
+            logger.exception('Futures entry failed')
+            return False, str(exc)
 
     async def monitor_positions(self):
         positions = await paper_engine.get_positions()

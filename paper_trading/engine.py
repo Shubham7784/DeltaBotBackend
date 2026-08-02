@@ -23,6 +23,10 @@ class PaperTradingEngine:
         self.size_map = {"BTCUSD":1000,
                          "ETHUSD":100}
         self.size = 0
+        self._position_cache = []
+        self._position_cache_updated_at = 0.0
+        self._position_cache_ttl_seconds = config.POSITION_CACHE_TTL_SECONDS
+        self._last_db_sync_at = 0.0
 
     def get_connection(self):
         if self.db_url:
@@ -125,80 +129,90 @@ class PaperTradingEngine:
         self.real_wallet_data = data.get("result", {})
 
     async def get_wallet(self):
-        # Use real balance from Delta if available (e.g. USDT or BTC)
-        usdt_data = {}
-        for asset in self.real_wallet_data:
-            if asset.get("asset_symbol") == "USD":
-                usdt_data = asset
-        real_balance = float(usdt_data.get("balance", -1))
-        
+        balance = float(getattr(config, "PAPER_WALLET_BALANCE", 1000000.0))
+
         positions = await self.get_positions()
         total_pnl = sum(p["unrealizedPnL"] for p in positions)
         used_margin = sum(p["margin"] for p in positions)
-        
-        equity = real_balance + total_pnl
-        
+
+        equity = balance + total_pnl
+
         return {
-            "balance": real_balance,
+            "balance": balance,
             "usedMargin": used_margin,
-            "availableBalance": real_balance - used_margin,
+            "availableBalance": balance - used_margin,
             "totalEquity": equity,
             "totalUnrealizedPnL": total_pnl,
             "asset": "USDT"
         }
 
-    async def get_positions(self):
-        positions = []
-        if(not config.IS_PAPER_TRADING):
-            live_pos = await self.client.get_live_positions()
-            self.client.user_id = live_pos.get("result", [{}])[0].get("user_id", 0) if live_pos.get("result") else 0
-            for pos in live_pos.get("result", []):
-                lot_size = self.size_map.get("BTCUSD") if("BTC" in pos.get("product_symbol", "")) else self.size_map.get("ETHUSD") if("ETH" in pos.get("product_symbol", "")) else 1
-                positions.append({
-                    "id": pos.get("product_id"),
-                    "symbol": pos.get("product_symbol"),
-                    "side": "LONG" if pos.get("size", 0) > 0 else "SHORT",
-                    "entryPrice": float(pos.get("entry_price", 0)),
-                    "currentPrice": float(pos.get("mark_price", 0)),
-                    "size": float(pos.get("size", 0)),
-                    "leverage": float(pos.get("leverage", 0)),
-                    "margin": float(pos.get("margin", 0)),
-                    "unrealizedPnL": (((float(pos.get("mark_price",0)) - float(pos.get("entry_price", 0)))* float(pos.get("size", 0)) / 1000)),
-                    "contractType": pos.get("product", {}).get("contract_type"),
-                    "timestamp": pos.get("timestamp")
-                })
+    def _normalize_db_position(self, row) -> Dict:
+        if hasattr(row, 'keys'):
+            data = dict(row)
+        elif isinstance(row, dict):
+            data = row
         else:
-            conn = self.get_connection()
-            if self.db_url:
-                # Postgres: use RealDictCursor for dict-like rows
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            data = {}
+        d = {str(k).lower(): v for k, v in data.items()}
+        pos = {
+            "id": d.get("id"),
+            "symbol": d.get("symbol", ""),
+            "side": d.get("side", ""),
+            "entryPrice": float(d.get("entryprice") or d.get("entry_price") or 0),
+            "currentPrice": float(d.get("currentprice") or d.get("current_price") or 0),
+            "size": float(d.get("size") or 0),
+            "leverage": float(d.get("leverage") or 0),
+            "margin": float(d.get("margin") or 0),
+            "unrealizedPnL": float(d.get("unrealized_pnl") or 0),
+            "timestamp": d.get("timestamp"),
+            "strategy": d.get("strategy"),
+            "contractType": d.get("contracttype") or d.get("contract_type"),
+        }
+        pos["entryprice"] = pos["entryPrice"]
+        pos["currentprice"] = pos["currentPrice"]
+        return pos
+
+    def _normalize_live_position(self, pos: Dict) -> Dict:
+        return {
+            "id": pos.get("product_id"),
+            "symbol": pos.get("product_symbol"),
+            "side": "LONG" if pos.get("size", 0) > 0 else "SHORT",
+            "entryPrice": float(pos.get("entry_price", 0)),
+            "currentPrice": float(pos.get("mark_price", 0)),
+            "size": float(pos.get("size", 0)),
+            "leverage": float(pos.get("leverage", 0)),
+            "margin": float(pos.get("margin", 0)),
+            "unrealizedPnL": (((float(pos.get("mark_price", 0)) - float(pos.get("entry_price", 0))) * float(pos.get("size", 0)) / 1000)),
+            "contractType": pos.get("product", {}).get("contract_type"),
+            "timestamp": pos.get("timestamp"),
+        }
+
+    def get_cached_positions(self):
+        return [dict(position) for position in self._position_cache]
+
+    async def refresh_position_cache(self, force: bool = False):
+        cache_age = time.time() - self._position_cache_updated_at
+        if not force and self._position_cache and cache_age < self._position_cache_ttl_seconds:
+            return self.get_cached_positions()
+
+        positions = []
+        try:
+            if config.IS_PAPER_TRADING or not config.ALLOW_REAL_ORDER_EXECUTION:
+                positions = [self._normalize_db_position(row) for row in await self.get_positions_from_db()]
             else:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-            cursor.execute('SELECT * FROM positions')
-            rows = cursor.fetchall()
-            for row in rows:
-                d = {k.lower(): v for k, v in dict(row).items()}
-                # Frontend expects camelCase but we also provide snake_case/lowercase for fallbacks
-                pos = {
-                    "id": d.get("id"),
-                    "symbol": d.get("symbol", ""),
-                    "side": d.get("side", ""),
-                    "entryPrice": float(d.get("entryprice") or d.get("entry_price") or 0),
-                    "currentPrice": float(d.get("currentprice") or d.get("current_price") or 0),
-                    "size": float(d.get("size") or 0),
-                    "leverage": float(d.get("leverage") or 0),
-                    "margin": float(d.get("margin") or 0),
-                    "unrealizedPnL": float(d.get("unrealized_pnl") or 0),
-                    "timestamp": d.get("timestamp"),
-                    "strategy": d.get("strategy")
-                }
-            # For extreme resilience, duplicate fields if needed
-            pos["entryprice"] = pos["entryPrice"]
-            pos["currentprice"] = pos["currentPrice"]
-            positions.append(pos)
-            conn.close()
-        return positions
+                live_pos = await self.client.get_live_positions()
+                self.client.user_id = live_pos.get("result", [{}])[0].get("user_id", 0) if live_pos.get("result") else 0
+                positions = [self._normalize_live_position(pos) for pos in live_pos.get("result", [])]
+        except Exception as exc:
+            logger.warning("Falling back to cached database positions because live position refresh failed: %s", exc)
+            positions = [self._normalize_db_position(row) for row in await self.get_positions_from_db()]
+
+        self._position_cache = [dict(position) for position in positions]
+        self._position_cache_updated_at = time.time()
+        return self.get_cached_positions()
+
+    async def get_positions(self):
+        return await self.refresh_position_cache(force=False)
 
     async def get_positions_from_db(self):
         conn = self.get_connection()
@@ -234,23 +248,24 @@ class PaperTradingEngine:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        positions = await self.get_positions()
+        positions = await self.get_positions_from_db()
         for pos in positions:
-            symbol = pos["symbol"]
+            symbol = pos.get("symbol")
             current_price = price_map.get(symbol)
             
             if current_price is not None and config.IS_PAPER_TRADING:
                 # Basic PnL: (Current - Entry) * Size * Multiplier
                 # For Inverse products (like BTC/USD on Delta) the calculation is more complex,
                 # but for Paper Trading V1 we'll stick to Linear simulation.
-                diff = current_price - pos["entryPrice"]
-                multiplier = 1 if pos["side"] == "LONG" else -1
-                new_pnl = diff * pos["size"] * multiplier
+                diff = current_price - float(pos.get("entryprice") or pos.get("entryPrice") or 0)
+                multiplier = 1 if str(pos.get("side", "")).upper() == "LONG" else -1
+                new_pnl = diff * float(pos.get("size") or 0) * multiplier
                 token = '%s' if self.db_url else '?'
-                cursor.execute(f'UPDATE positions SET unrealized_pnl = {token}, currentprice = {token} WHERE id = {token}', (new_pnl, current_price, pos["id"]))
+                cursor.execute(f'UPDATE positions SET unrealized_pnl = {token}, currentprice = {token} WHERE id = {token}', (new_pnl, current_price, pos.get("id")))
         
         conn.commit()
         conn.close()
+        await self.refresh_position_cache(force=True)
 
     async def update_positions_with_live_price(self):
         # This can be called after fetching live price to update PnL
@@ -290,12 +305,15 @@ class PaperTradingEngine:
         }
         
         conn = self.get_connection()
-        if(not config.IS_PAPER_TRADING):
+        should_execute_live_order = (not config.IS_PAPER_TRADING) and config.ALLOW_REAL_ORDER_EXECUTION
+        if should_execute_live_order:
             if("BTC" in order.get("symbol")):
                 size = size * self.size_map["BTCUSD"] # Convert to contract size for BTC
             elif("ETH" in order.get("symbol")):
                 size = size * self.size_map["ETHUSD"] # Convert to contract size for ETH
             await self.client.open_live_position(order, side, size, price, leverage) # Placeholder for live trading logic
+        elif not config.IS_PAPER_TRADING:
+            logger.info("Live order execution is disabled; recording a paper position in the database instead")
         
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) if self.db_url else conn.cursor()
         token = '%s' if self.db_url else '?'
@@ -305,6 +323,7 @@ class PaperTradingEngine:
             '''.format(token), (pos_id, order.get("symbol"), side, price, price, size, leverage, margin_req, 0.0, time.time(),strategy))
         conn.commit()    
         conn.close()
+        await self.refresh_position_cache(force=True)
         
         # Send Telegram alert
         await telegram_bot.send_position_opened(
@@ -372,14 +391,18 @@ class PaperTradingEngine:
         
         cursor.execute('DELETE FROM positions')
         conn.commit()
-        conn.close()    
+        conn.close()
+        self._position_cache = []
+        self._position_cache_updated_at = time.time()
 
     async def get_adaptive_active_strategies(self):
         names = {
             'Iron Condor', 'Bullish Broken Wing Butterfly', 'Bearish Broken Wing Butterfly',
             'Bull Call Debit Spread', 'Bear Put Debit Spread', 'Long Straddle', 'Long Strangle',
+            'Futures Momentum',
         }
-        return sorted({position.get('strategy') for position in await self.get_positions_from_db() if position.get('strategy') in names})
+        positions = await self.get_positions()
+        return sorted({position.get('strategy') for position in positions if position.get('strategy') in names})
 
     async def close_positions_at_expiry_cutoff(self):
         """Close option positions at 5:20 PM IST on their expiry date.
@@ -458,17 +481,18 @@ class PaperTradingEngine:
         cursor.execute(f'DELETE FROM positions WHERE strategy = {token}', (strategy_name,))
         conn.commit()
         conn.close()
+        await self.refresh_position_cache(force=True)
         return True
         
         
 
     async def is_broken_wing_butterfly_active(self):
-        positions = await self.get_positions_from_db()
+        positions = await self.get_positions()
         active_pos = [pos for pos in positions if pos.get("strategy") == "Broken Wing Butterfly"]
         return len(active_pos) == 4
     
     async def is_directional_active(self):
-        positions = await self.get_positions_from_db()
+        positions = await self.get_positions()
         return any(pos.get("strategy") == "Broken Wing Butterfly" for pos in positions)
 
 
