@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 import json
 import uuid
@@ -154,12 +155,17 @@ class PaperTradingEngine:
         else:
             data = {}
         d = {str(k).lower(): v for k, v in data.items()}
+        current_price = None
+        for key in ("currentprice", "current_price", "currentPrice"):
+            if key in d:
+                current_price = d.get(key)
+                break
         pos = {
             "id": d.get("id"),
             "symbol": d.get("symbol", ""),
             "side": d.get("side", ""),
             "entryPrice": float(d.get("entryprice") or d.get("entry_price") or 0),
-            "currentPrice": float(d.get("currentprice") or d.get("current_price") or 0),
+            "currentPrice": float(current_price or 0),
             "size": float(d.get("size") or 0),
             "leverage": float(d.get("leverage") or 0),
             "margin": float(d.get("margin") or 0),
@@ -186,6 +192,29 @@ class PaperTradingEngine:
             "contractType": pos.get("product", {}).get("contract_type"),
             "timestamp": pos.get("timestamp"),
         }
+
+    @staticmethod
+    def _normalize_symbol(symbol) -> str:
+        if symbol is None:
+            return ""
+        return re.sub(r"[^a-z0-9]+", "", str(symbol).strip().lower())
+
+    def _resolve_price_for_symbol(self, price_map: Dict[str, float], symbol: Optional[str]) -> Optional[float]:
+        if symbol is None:
+            return None
+
+        direct_price = price_map.get(symbol)
+        if direct_price is not None:
+            return float(direct_price)
+
+        normalized_symbol = self._normalize_symbol(symbol)
+        for candidate_symbol, candidate_price in price_map.items():
+            if self._normalize_symbol(candidate_symbol) == normalized_symbol and candidate_price is not None:
+                return float(candidate_price)
+        return None
+
+    def _get_db_placeholder(self) -> str:
+        return "%s" if self.db_url else "?"
 
     def get_cached_positions(self):
         return [dict(position) for position in self._position_cache]
@@ -242,27 +271,44 @@ class PaperTradingEngine:
 
     async def update_prices(self, price_map: Dict[str, float]):
         """Updates unrealized PnL for all positions based on a symbol->price map."""
-        if "BTCUSD" in price_map:
-            self.btc_price = price_map["BTCUSD"]
-            
+        btc_price_key = None
+        for symbol in ["BTCUSD", "BTC-USD", "BTC/USD", "BTCUSDT"]:
+            if symbol in price_map:
+                btc_price_key = symbol
+                break
+        if btc_price_key is not None:
+            self.btc_price = float(price_map[btc_price_key])
+
+        positions = await self.get_positions_from_db()
+        if not positions:
+            await self.refresh_position_cache(force=True)
+            return
+
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        positions = await self.get_positions_from_db()
+
         for pos in positions:
             symbol = pos.get("symbol")
-            current_price = price_map.get(symbol)
-            
-            if current_price is not None and config.IS_PAPER_TRADING:
+            current_price = self._resolve_price_for_symbol(price_map, symbol)
+
+            if current_price is not None:
                 # Basic PnL: (Current - Entry) * Size * Multiplier
                 # For Inverse products (like BTC/USD on Delta) the calculation is more complex,
                 # but for Paper Trading V1 we'll stick to Linear simulation.
                 diff = current_price - float(pos.get("entryprice") or pos.get("entryPrice") or 0)
                 multiplier = 1 if str(pos.get("side", "")).upper() == "LONG" else -1
                 new_pnl = diff * float(pos.get("size") or 0) * multiplier
-                token = '%s' if self.db_url else '?'
-                cursor.execute(f'UPDATE positions SET unrealized_pnl = {token}, currentprice = {token} WHERE id = {token}', (new_pnl, current_price, pos.get("id")))
-        
+                if self.db_url:
+                    cursor.execute(
+                        'UPDATE positions SET unrealized_pnl = %s, currentprice = %s WHERE id = %s',
+                        (new_pnl, current_price, pos.get("id")),
+                    )
+                else:
+                    cursor.execute(
+                        'UPDATE positions SET unrealized_pnl = ?, currentPrice = ? WHERE id = ?',
+                        (new_pnl, current_price, pos.get("id")),
+                    )
+
         conn.commit()
         conn.close()
         await self.refresh_position_cache(force=True)
@@ -271,17 +317,27 @@ class PaperTradingEngine:
         # This can be called after fetching live price to update PnL
         conn = self.get_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) if self.db_url else conn.cursor()
-        
+
         positions = await self.get_positions()
         for pos in positions:
             live_pos = await self.client.get_product_price(pos["symbol"])
             diff = live_pos - pos["entryprice"]
             multiplier = 1 if pos["side"] == "LONG" else -1
             new_pnl = diff * pos["size"] * multiplier
-            cursor.execute(f'UPDATE positions SET currentPrice = %s, unrealized_pnl = %s WHERE id = %s', (live_pos, new_pnl, pos["id"]))
-        
+            if self.db_url:
+                cursor.execute(
+                    'UPDATE positions SET currentprice = %s, unrealized_pnl = %s WHERE id = %s',
+                    (live_pos, new_pnl, pos["id"]),
+                )
+            else:
+                cursor.execute(
+                    'UPDATE positions SET currentPrice = ?, unrealized_pnl = ? WHERE id = ?',
+                    (live_pos, new_pnl, pos["id"]),
+                )
+
         conn.commit()
         conn.close()
+        await self.refresh_position_cache(force=True)
         
     async def open_position(self, order:dict, side: str, size: float, price: float, leverage: float, strategy: str):
         wallet = await self.get_wallet()

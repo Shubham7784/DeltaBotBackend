@@ -19,6 +19,36 @@ class DummyMarketAnalyzer:
         return {'regime': self.regime, 'confidence': self.confidence, 'reasons': self.reasons}
 
 
+def test_update_prices_refreshes_db_and_cache_for_symbol_aliases(monkeypatch):
+    engine = PaperTradingEngine()
+    engine._position_cache = []
+    engine._position_cache_updated_at = 0
+
+    async def fake_get_positions_from_db():
+        return [{"id": "1", "symbol": "BTCUSD", "side": "LONG", "entryPrice": 100.0, "currentPrice": 100.0, "size": 1.0, "leverage": 10.0, "margin": 10.0, "unrealized_pnl": 0.0, "timestamp": 1.0, "strategy": "demo"}]
+
+    monkeypatch.setattr(engine, "get_positions_from_db", fake_get_positions_from_db)
+
+    async def main():
+        conn = engine.get_connection()
+        cursor = conn.cursor()
+        placeholder = engine._get_db_placeholder()
+        cursor.execute(
+            f"INSERT INTO positions (id, symbol, side, entryPrice, currentPrice, size, leverage, margin, unrealized_pnl, timestamp, strategy) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
+            ("1", "BTCUSD", "LONG", 100.0, 100.0, 1.0, 10.0, 10.0, 0.0, 1.0, "demo"),
+        )
+        conn.commit()
+        conn.close()
+
+        await engine.update_prices({"BTC-USD": 110.0})
+        db_positions = await engine.get_positions_from_db()
+        assert db_positions[0]["currentPrice"] == 110.0
+        cached_positions = await engine.get_positions()
+        assert cached_positions[0]["currentPrice"] == 110.0
+
+    asyncio.run(main())
+
+
 def test_cache_refresh_and_futures_fallback(monkeypatch):
     engine = PaperTradingEngine()
     engine._position_cache = []
