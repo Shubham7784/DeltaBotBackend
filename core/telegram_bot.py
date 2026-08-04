@@ -89,6 +89,32 @@ class TelegramAlertBot:
         )
         await self.send_message(message)
 
+    async def send_liquidation_alert(
+        self,
+        symbol: str,
+        side: str,
+        leverage: float,
+        entry_price: float,
+        current_price: float,
+        liquidation_price: float,
+        pnl: float,
+        strategy: str = "",
+    ):
+        """Send alert when a position is at or beyond its leverage-based liquidation threshold."""
+        message = (
+            f"<b>🚨 Liquidation Alert</b>\n"
+            f"<b>Symbol:</b> {symbol}\n"
+            f"<b>Side:</b> {side}\n"
+            f"<b>Leverage:</b> {leverage}x\n"
+            f"<b>Entry Price:</b> {entry_price:.2f}\n"
+            f"<b>Current Price:</b> {current_price:.2f}\n"
+            f"<b>Liquidation Price:</b> {liquidation_price:.2f}\n"
+            f"<b>PnL:</b> {pnl:.2f}"
+        )
+        if strategy:
+            message += f"\n<b>Strategy:</b> {strategy}"
+        await self.send_message(message)
+
     async def send_error_alert(self, error_msg: str, context: str = ""):
         """Send alert for critical errors."""
         message = (

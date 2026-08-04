@@ -49,6 +49,40 @@ def test_update_prices_refreshes_db_and_cache_for_symbol_aliases(monkeypatch):
     asyncio.run(main())
 
 
+def test_update_prices_sends_liquidation_alert_when_position_is_near_liquidation(monkeypatch):
+    engine = PaperTradingEngine()
+    engine._position_cache = []
+    engine._position_cache_updated_at = 0
+    engine._liquidation_alerted_ids = set()
+
+    async def fake_get_positions_from_db():
+        return [{"id": "1", "symbol": "BTCUSD", "side": "LONG", "entryPrice": 100.0, "currentPrice": 100.0, "size": 1.0, "leverage": 10.0, "margin": 10.0, "unrealized_pnl": 0.0, "timestamp": 1.0, "strategy": "demo"}]
+
+    monkeypatch.setattr(engine, "get_positions_from_db", fake_get_positions_from_db)
+
+    async def fake_refresh_position_cache(force=False):
+        return []
+
+    monkeypatch.setattr(engine, "refresh_position_cache", fake_refresh_position_cache)
+
+    sent_messages = []
+
+    async def fake_send_liquidation_alert(**kwargs):
+        sent_messages.append(kwargs)
+        return True
+
+    monkeypatch.setattr("paper_trading.engine.telegram_bot.send_liquidation_alert", fake_send_liquidation_alert)
+
+    async def main():
+        await engine.update_prices({"BTCUSD": 90.0})
+
+    asyncio.run(main())
+
+    assert len(sent_messages) == 1
+    assert sent_messages[0]["side"] == "LONG"
+    assert sent_messages[0]["symbol"] == "BTCUSD"
+
+
 def test_cache_refresh_and_futures_fallback(monkeypatch):
     engine = PaperTradingEngine()
     engine._position_cache = []

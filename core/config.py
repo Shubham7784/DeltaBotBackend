@@ -20,7 +20,8 @@ class Config:
     POSITION_CACHE_TTL_SECONDS = int(os.getenv("POSITION_CACHE_TTL_SECONDS", "3600"))
     OPTION_LEVERAGE = int(os.getenv("OPTION_LEVERAGE", 100))
     LOT_SIZE = float(os.getenv("LOT_SIZE", 0.05))
-    PAPER_WALLET_BALANCE = float(os.getenv("PAPER_WALLET_BALANCE", "1000000"))
+    PAPER_WALLET_BALANCE = float(os.getenv("PAPER_WALLET_BALANCE", "10000"))
+    TIME_FRAME = os.getenv("TIME_FRAME", "1h")
 
     POOR_MANS_LOT_SIZE = float(os.getenv("POOR_MANS_LOT_SIZE", 0.05))
 

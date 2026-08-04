@@ -28,6 +28,7 @@ class PaperTradingEngine:
         self._position_cache_updated_at = 0.0
         self._position_cache_ttl_seconds = config.POSITION_CACHE_TTL_SECONDS
         self._last_db_sync_at = 0.0
+        self._liquidation_alerted_ids = set()
 
     def get_connection(self):
         if self.db_url:
@@ -309,9 +310,55 @@ class PaperTradingEngine:
                         (new_pnl, current_price, pos.get("id")),
                     )
 
+                await self._check_liquidation_risk(pos, current_price, new_pnl)
+
         conn.commit()
         conn.close()
         await self.refresh_position_cache(force=True)
+
+    async def _check_liquidation_risk(self, position: Dict, current_price: float, pnl: float):
+        position_id = position.get("id")
+        if not position_id or position_id in self._liquidation_alerted_ids:
+            return
+
+        leverage = float(position.get("leverage") or 0)
+        entry_price = float(position.get("entryprice") or position.get("entryPrice") or 0)
+        size = float(position.get("size") or 0)
+        if leverage <= 0 or size <= 0 or entry_price <= 0:
+            return
+
+        side = str(position.get("side") or "").upper()
+        if side == "LONG":
+            liquidation_price = entry_price * (1 - (1 / leverage))
+        elif side == "SHORT":
+            liquidation_price = entry_price * (1 + (1 / leverage))
+        else:
+            return
+
+        if side == "LONG" and current_price <= liquidation_price:
+            await telegram_bot.send_liquidation_alert(
+                symbol=position.get("symbol"),
+                side=side,
+                leverage=leverage,
+                entry_price=entry_price,
+                current_price=current_price,
+                liquidation_price=liquidation_price,
+                pnl=pnl,
+                strategy=position.get("strategy"),
+            )
+            self._liquidation_alerted_ids.add(position_id)
+        elif side == "SHORT" and current_price >= liquidation_price:
+            await telegram_bot.send_liquidation_alert(
+                symbol=position.get("symbol"),
+                side=side,
+                leverage=leverage,
+                entry_price=entry_price,
+                current_price=current_price,
+                liquidation_price=liquidation_price,
+                pnl=pnl,
+                strategy=position.get("strategy"),
+            )
+            self._liquidation_alerted_ids.add(position_id)
 
     async def update_positions_with_live_price(self):
         # This can be called after fetching live price to update PnL
@@ -418,20 +465,8 @@ class PaperTradingEngine:
             # In a real engine we'd pass the prices here.
             # For now let's just use the unrealized_pnl they have.
             token = '%s' if self.db_url else '?'
-            cursor.execute('''
-                INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp, strategy)
-                VALUES ({0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0})
-            '''.format(token), (
-                pos["id"], 
-                pos["symbol"], 
-                pos["side"], 
-                pos["entryPrice"], 
-                pos["currentPrice"], # Simplified: using current engine price
-                pos["size"], 
-                pos["unrealizedPnL"], 
-                time.time(),
-                pos["strategy"]
-            ))
+            stmt = f"INSERT INTO trade_history (id, symbol, side, entryPrice, closePrice, size, pnl, timestamp, strategy) VALUES ('{pos['id']}', '{pos['symbol']}', '{pos['side']}', {pos['entryPrice']}, {pos['currentPrice']}, {pos['size']}, {pos['unrealizedPnL']}, {time.time()}, '{pos['strategy']}')"
+            cursor.execute(stmt)
             
             # Send Telegram alert for each closed position
             await telegram_bot.send_position_closed(
@@ -460,26 +495,38 @@ class PaperTradingEngine:
         positions = await self.get_positions()
         return sorted({position.get('strategy') for position in positions if position.get('strategy') in names})
 
-    async def close_positions_at_expiry_cutoff(self):
+    async def close_positions_at_expiry_cutoff(self, now=None):
         """Close option positions at 5:20 PM IST on their expiry date.
 
-        Positions are closed by strategy so every leg of a multi-leg option
-        structure is exited together.  Non-option instruments are ignored.
+        Positions are closed by strategy when available so every leg of a
+        multi-leg option structure is exited together.  Positions without a
+        strategy label are closed individually by their database ID.
+        Non-option instruments are ignored.
         """
-        strategy_names = set()
+        close_targets = []
         for position in await self.get_positions_from_db():
             expiry = option_expiry_from_symbol(position.get("symbol"))
-            strategy = position.get("strategy")
-            if expiry and strategy and is_expiry_close_due(expiry):
-                strategy_names.add(strategy)
+            if not expiry:
+                continue
+            if not is_expiry_close_due(expiry, now):
+                continue
+
+            strategy = (position.get("strategy") or "").strip()
+            if strategy:
+                if strategy not in close_targets:
+                    close_targets.append(strategy)
+            else:
+                position_id = position.get("id")
+                if position_id and position_id not in close_targets:
+                    close_targets.append(position_id)
 
         closed = []
-        for strategy_name in sorted(strategy_names):
-            if await self.close_position(strategy_name, suppress_missing=True):
-                closed.append(strategy_name)
+        for target in sorted(close_targets):
+            if await self.close_position(target, suppress_missing=True):
+                closed.append(target)
                 logger.info(
                     "Closed %s at the 5:20 PM IST expiry cutoff",
-                    strategy_name,
+                    target,
                 )
         return closed
 
@@ -493,6 +540,9 @@ class PaperTradingEngine:
         token = '%s' if self.db_url else '?'
         cursor.execute(f'SELECT * FROM positions WHERE strategy = {token}', (strategy_name,))
         db_pos = [dict(row) for row in cursor.fetchall()]
+        if not db_pos:
+            cursor.execute(f'SELECT * FROM positions WHERE id = {token}', (strategy_name,))
+            db_pos = [dict(row) for row in cursor.fetchall()]
         if not db_pos:
             conn.close()
             if suppress_missing:
@@ -534,7 +584,10 @@ class PaperTradingEngine:
                 strategy=db.get("strategy", "N/A")
             )
             logger.info("Position closed: %s %s PnL: %.2f", db["symbol"], db["side"], db["unrealized_pnl"])
-        cursor.execute(f'DELETE FROM positions WHERE strategy = {token}', (strategy_name,))
+        if db_pos and db_pos[0].get("strategy"):
+            cursor.execute(f'DELETE FROM positions WHERE strategy = {token}', (strategy_name,))
+        else:
+            cursor.execute(f'DELETE FROM positions WHERE id = {token}', (strategy_name,))
         conn.commit()
         conn.close()
         await self.refresh_position_cache(force=True)
